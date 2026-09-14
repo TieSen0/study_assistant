@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "408 Lens · 智能学习诊断",
-  description: "11408 智能学习诊断与自适应训练系统演示。",
+  title: "研 Lens · 考研全科智能诊断",
+  description: "政治、英语一、数学一与 11408 的智能学习诊断演示。",
   other: {
     "codex-preview": "development",
   },
