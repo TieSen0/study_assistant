@@ -1,0 +1,9 @@
+.site-stage*/
+site-package*.tar.gz
+local_ocr/*.whl
+__pycache__/
+*.pyc
+node_modules/
+.next/
+.env
+.env.local
