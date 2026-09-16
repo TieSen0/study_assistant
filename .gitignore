@@ -44,3 +44,15 @@ next-env.d.ts
 /.codex/
 /outputs/
 /work/
+
+# Local OCR model/runtime downloads. They are installed or downloaded per machine.
+/local_ocr/*.whl
+/local_ocr/*.tmp
+/local_ocr/__pycache__/
+/local_ocr/.venv/
+
+# Deployment staging archives are generated artifacts, not source.
+/.site-stage/
+/.site-stage-v2/
+/.site-stage-v3/
+/site-package*.tar.gz

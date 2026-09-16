@@ -1,1 +1,6 @@
+numpy==2.0.2
+pandas==2.2.3
 rapidocr-onnxruntime>=1.4.4
+paddlepaddle==3.3.0
+paddleocr>=3.7.0,<3.8.0
+paddlex[ocr]==3.7.2
