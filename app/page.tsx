@@ -2,6 +2,7 @@
 
 import "./import-status.css";
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import pdfWorkerSrc from "pdfjs-dist/legacy/build/pdf.worker.mjs?url";
 import {
   BookOpen,
   Bookmark,
@@ -74,7 +75,9 @@ async function extractPages(file: File): Promise<ReadingPage[]> {
   const lowerName = file.name.toLowerCase();
   if (file.type === "application/pdf" || lowerName.endsWith(".pdf")) {
     const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-    pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/legacy/build/pdf.worker.mjs", import.meta.url).toString();
+    // Vite turns `new URL(..., import.meta.url)` into a file:// URL in this
+    // client bundle. Importing with ?url emits a browser-accessible asset URL.
+    pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerSrc;
     const pdf = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
     const pages: ReadingPage[] = [];
     for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
