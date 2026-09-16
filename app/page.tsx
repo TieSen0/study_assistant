@@ -1,53 +1,162 @@
 "use client";
 
-import { useState } from "react";
-import { Activity, ArrowRight, BookOpen, BrainCircuit, Check, ChevronDown, Clock3, Flame, Grid2X2, Languages, LineChart, Network, Play, Sparkles, Target } from "lucide-react";
+import { useMemo, useState } from "react";
+import {
+  BookOpen,
+  Bookmark,
+  ChevronDown,
+  FileText,
+  FolderOpen,
+  Highlighter,
+  LibraryBig,
+  MessageCircleQuestion,
+  MoreHorizontal,
+  Network,
+  PanelLeftClose,
+  Plus,
+  Quote,
+  Search,
+  Send,
+  Sparkles,
+  Upload,
+} from "lucide-react";
 
-type SubjectKey = "math" | "english" | "politics" | "cs";
-
-const navigation = [
-  { icon: Grid2X2, label: "全科概览", active: true },
-  { icon: BrainCircuit, label: "AI 诊断" },
-  { icon: Network, label: "知识网络" },
-  { icon: BookOpen, label: "错题与笔记" },
-  { icon: LineChart, label: "学习报告" },
-];
-
-const subjects: Record<SubjectKey, { label: string; tag: string; mastery: number; tone: string; title: string; chapter: string; prompt: string; choices: [string, string][]; correct: string; concept: string; note: string; next: string; duration: string; skills: { label: string; value: number; color: string }[]; nodes: [string, string, string, string, string] }> = {
-  math: {
-    label: "数学一", tag: "Math I", mastery: 61, tone: "math", title: "高等数学 · 积分极限", chapter: "函数极限 / 泰勒展开与积分", prompt: "设 f(x)=∫₀ˣ [ln(1+t)/t]dt，则 limₓ→₀ [f(x)−x+x²/4]/x³ = ?", choices: [["A", "1 / 6"], ["B", "1 / 9"], ["C", "1 / 3"], ["D", "0"]], correct: "B", concept: "被积函数展开后逐项积分", note: "需将 ln(1+t)/t 展开至 t² 项后积分；被积函数的阶数和积分后的阶数要分别判断。", next: "高等数学 · 含参积分与极值", duration: "30 分钟 · 4 题（含 1 题综合）", skills: [{ label: "高等数学", value: 62, color: "var(--violet)" }, { label: "线性代数", value: 58, color: "var(--amber)" }, { label: "概率论与数理统计", value: 63, color: "var(--mint)" }], nodes: ["积分极限", "泰勒展开", "等价无穷小", "积分中值", "洛必达法则"]
-  },
-  english: {
-    label: "英语一", tag: "English I", mastery: 72, tone: "english", title: "阅读 · 推断题", chapter: "阅读理解 / 论证关系", prompt: "In the passage, why do small experiments matter most?", choices: [["A", "They eliminate all uncertainty."], ["B", "They turn an abstract claim into evidence."], ["C", "They make research cheaper."], ["D", "They replace long-term planning."]], correct: "B", concept: "同义替换与因果定位", note: "定位 experiments 前后的 evidence / claim 关系，而不是逐词翻译。", next: "阅读理解 · 论点与例证关系", duration: "22 分钟 · 1 篇阅读 + 2 句翻译", skills: [{ label: "阅读理解", value: 74, color: "var(--sky)" }, { label: "翻译", value: 66, color: "var(--amber)" }, { label: "写作", value: 71, color: "var(--mint)" }], nodes: ["中心论点", "例证关系", "同义替换", "长难句", "翻译断句"]
-  },
-  politics: {
-    label: "政治", tag: "Politics", mastery: 54, tone: "politics", title: "马原 · 实践观点", chapter: "马克思主义基本原理 / 认识论", prompt: "实践作为检验真理的唯一标准，主要因为实践具有？", choices: [["A", "直接现实性"], ["B", "客观物质性"], ["C", "主观能动性"], ["D", "社会历史性"]], correct: "A", concept: "真理标准", note: "“检验”强调实践把主观认识转化为客观结果的直接现实性。", next: "史纲 · 重要会议时间轴", duration: "20 分钟 · 8 道选择题", skills: [{ label: "马原", value: 58, color: "var(--violet)" }, { label: "史纲", value: 51, color: "var(--amber)" }, { label: "毛中特 / 思修", value: 54, color: "var(--mint)" }], nodes: ["实践观点", "认识运动", "真理", "价值", "矛盾分析法"]
-  },
-  cs: {
-    label: "11408", tag: "CS", mastery: 68, tone: "cs", title: "操作系统 · 信号量", chapter: "操作系统 / 进程同步", prompt: "若信号量 S 的初值为 3，当前值为 −2，以下判断正确的是？", choices: [["A", "有 2 个进程正在等待该资源"], ["B", "有 3 个进程正在等待该资源"], ["C", "有 2 个进程正在使用该资源"], ["D", "有 5 个进程正在使用该资源"]], correct: "A", concept: "信号量的物理意义", note: "当 S < 0 时，|S| 表示等待该资源的进程数。", next: "死锁 · 安全性判断", duration: "25 分钟 · 6 题", skills: [{ label: "数据结构", value: 82, color: "var(--sky)" }, { label: "计算机组成", value: 57, color: "var(--amber)" }, { label: "操作系统", value: 63, color: "var(--violet)" }, { label: "计算机网络", value: 71, color: "var(--mint)" }], nodes: ["进程同步", "信号量", "P / V 操作", "死锁", "管程"]
-  }
+type ReadingDocument = {
+  id: string;
+  type: "论文" | "书籍" | "笔记";
+  title: string;
+  source: string;
+  tag: string;
+  heading: string;
+  paragraphs: string[];
+  selected: string;
 };
 
-export default function Home() {
-  const [active, setActive] = useState<SubjectKey>("math");
-  const [choice, setChoice] = useState<string | null>(null);
-  const [diagnosed, setDiagnosed] = useState(false);
-  const current = subjects[active];
-  function selectSubject(key: SubjectKey) { setActive(key); setChoice(null); setDiagnosed(false); }
-  function answer(key: string) { setChoice(key); setDiagnosed(true); }
+const documents: ReadingDocument[] = [
+  {
+    id: "retrieval",
+    type: "论文",
+    title: "Retrieval as a Reading Practice",
+    source: "Reading systems · 18 页",
+    tag: "正在阅读",
+    heading: "1. Reading is not storage",
+    paragraphs: [
+      "A reading system should lower the cost of returning to evidence, rather than merely increase the amount of notes a reader produces.",
+      "The useful unit is not a document-sized summary. It is a claim, the passage that supports it, and the question that caused the reader to care.",
+      "When a later question arrives, retrieval should surface the smallest sufficient context and preserve the path back to the original page."
+    ],
+    selected: "The useful unit is not a document-sized summary. It is a claim, the passage that supports it, and the question that caused the reader to care."
+  },
+  {
+    id: "algorithm",
+    type: "书籍",
+    title: "算法导论 · 动态规划",
+    source: "第 15 章 · 42 分钟前",
+    tag: "继续阅读",
+    heading: "15.3 最优子结构",
+    paragraphs: [
+      "动态规划并不是记住更多状态，而是先证明一个最优解能由更小的最优解组成。",
+      "若某个子问题的选择会改变后续子问题的定义，就需要谨慎检查是否真的存在最优子结构。",
+      "推导状态转移式之前，先写清状态究竟承诺了什么信息。"
+    ],
+    selected: "推导状态转移式之前，先写清状态究竟承诺了什么信息。"
+  },
+  {
+    id: "methods",
+    type: "笔记",
+    title: "论文方法论 · 可信证据",
+    source: "个人摘录 · 6 个片段",
+    tag: "我的笔记",
+    heading: "证据与结论之间",
+    paragraphs: [
+      "结论是否成立，取决于证据是否足以排除更简单的解释。",
+      "阅读论文时，先分开记录作者的主张、证据和自己尚未接受的推论。",
+      "不确定性不应被抹平；它应成为下一次检索或实验的方向。"
+    ],
+    selected: "阅读论文时，先分开记录作者的主张、证据和自己尚未接受的推论。"
+  }
+];
 
-  return <main className="app-shell">
-    <aside className="sidebar"><div className="brand-mark exam-brand" aria-label="研 Lens"><span>研</span><i>·</i><b>Lens</b></div><nav aria-label="主导航">{navigation.map(({ icon: Icon, label, active: isActive }) => <button className={`nav-item ${isActive ? "active" : ""}`} key={label} type="button"><Icon size={19} strokeWidth={isActive ? 2.4 : 1.8} /><span>{label}</span></button>)}</nav><div className="sidebar-bottom"><div className="sync-state"><span /> 本地学习库</div><button className="profile" type="button"><span>Y</span><strong>Yuki</strong><ChevronDown size={15} /></button></div></aside>
-    <section className="workspace"><header className="topbar"><div className="crumb"><span>考研全科</span><ArrowRight size={14} /><strong>学习驾驶舱</strong></div><button className="new-session" type="button"><Sparkles size={16} /> 开始诊断</button></header>
-      <div className="content">
-        <section className="welcome-row"><div><p className="eyebrow"><span className="pulse" /> MONDAY · SEP 14</p><h1>把四门课的模糊进度，变成<br /><em>今天具体的一步。</em></h1></div><div className="streak-card"><div className="flame"><Flame size={20} fill="currentColor" /></div><div><strong>12 天</strong><span>连续学习</span></div><div className="streak-bars">{[1,2,3,4,5,6,7].map(day => <i key={day} className={day === 6 ? "today" : ""} />)}</div></div></section>
-        <section className="subject-grid" aria-label="全科掌握度">{(Object.keys(subjects) as SubjectKey[]).map(key => { const subject = subjects[key]; return <button key={key} type="button" onClick={() => selectSubject(key)} className={`subject-card ${subject.tone} ${active === key ? "selected" : ""}`}><span className="subject-card-tag">{subject.tag}</span><strong>{subject.label}</strong><div className="subject-meter"><i style={{ width: `${subject.mastery}%` }} /></div><b>{subject.mastery}% <small>掌握度</small></b>{active === key && <span className="active-marker"><Check size={12} /> 当前练习</span>}</button>})}</section>
-        <section className="stats-grid compact-stats"><article className="metric-card dark-card"><div className="metric-head"><span>本周专注</span><Clock3 size={17} /></div><div className="metric-value">16<span>h</span> 10<span>m</span></div><div className="metric-foot"><span className="up">↑ 22%</span> 已完成 18 / 24 个计划番茄钟</div><div className="focus-bars">{[28,42,33,57,45,72,64,82,39,60,76,46].map((height, i) => <i key={i} style={{ height: `${height}%` }} />)}</div></article><article className="metric-card mastery-card"><div className="metric-head"><span>今日计划</span><Target size={17} /></div><div className="today-list"><span><i className="dot-math" /> 数学一 2 组</span><span><i className="dot-english" /> 英语一 1 篇</span><span><i className="dot-politics" /> 政治 8 题</span><span><i className="dot-cs" /> 11408 6 题</span></div></article><article className="metric-card review-card"><div className="metric-head"><span>待复习</span><BrainCircuit size={17} /></div><div className="review-number">25 <small>个知识点</small></div><p>数学一 8 个，英语一 5 个<br />优先处理高遗忘风险节点</p><button type="button">查看全科队列 <ArrowRight size={14} /></button></article></section>
-        <section className="two-column"><article className="panel diagnostic-panel"><div className="panel-head"><div><p className="eyebrow">ACTIVE DIAGNOSIS · {current.tag.toUpperCase()}</p><h2>{current.title}</h2></div><span className="step-pill">01 / 03</span></div><div className="topic-line"><span>{current.label}</span><i /> <b>{current.chapter}</b></div><h3>{current.prompt}</h3><div className="answers">{current.choices.map(([key, text]) => <button key={key} onClick={() => answer(key)} type="button" className={`${choice === key ? "selected" : ""} ${diagnosed && key === current.correct ? "correct" : ""}`}><span>{key}</span>{text}{diagnosed && key === current.correct && <Check size={17} />}</button>)}</div>{!diagnosed ? <p className="hint">选择答案后，系统会判断你的错因并安排下一步。</p> : <div className={`diagnosis ${choice === current.correct ? "success" : ""}`}><div className="diagnosis-icon">{choice === current.correct ? <Check size={18} /> : <Activity size={18} />}</div><div><strong>{choice === current.correct ? `判断正确：你抓住了「${current.concept}」。` : `发现关键误区：需要回到「${current.concept}」。`}</strong><p>{current.note}</p></div><button type="button" aria-label="继续"><ArrowRight size={18} /></button></div>}</article>
-          <article className="panel graph-panel"><div className="panel-head"><div><p className="eyebrow">KNOWLEDGE MAP</p><h2>{current.label} · 知识网络</h2></div><button className="text-button" type="button">打开图谱 <ArrowRight size={15} /></button></div><div className="constellation"><div className="line line-one" /><div className="line line-two" /><div className="line line-three" /><div className="line line-four" /><div className="node core"><span>{current.nodes[0]}</span><small>{current.mastery}%</small></div><div className="node node-one"><span>{current.nodes[1]}</span><small>已练习</small></div><div className="node node-two"><span>{current.nodes[2]}</span><small>待复习</small></div><div className="node node-three"><span>{current.nodes[3]}</span><small>新知识</small></div><div className="node node-four"><span>{current.nodes[4]}</span><small>薄弱</small></div></div><div className="graph-legend"><span><i className="dot-violet" /> 已掌握</span><span><i className="dot-amber" /> 建议加强</span><span><i className="dot-mist" /> 未覆盖</span></div></article></section>
-        <section className="lower-grid"><article className="panel roadmap-panel"><div className="panel-head"><div><p className="eyebrow">LEARNING MODEL</p><h2>{active === "math" ? "数学一 · 三模块掌握度" : `${current.label} · 能力分布`}</h2></div><button className="period" type="button">近 30 天 <ChevronDown size={14} /></button></div><div className="roadmap-list">{current.skills.map(item => <div className="roadmap-row" key={item.label}><span>{item.label}</span><div className="bar"><i style={{ width: `${item.value}%`, background: item.color }} /></div><b>{item.value}%</b></div>)}</div></article><article className="panel next-panel"><div className="panel-head"><div><p className="eyebrow">RECOMMENDED NEXT</p><h2>接下来 {current.duration.split(" · ")[0]}</h2></div><span className="ai-tag"><Sparkles size={13} /> 自适应推荐</span></div><div className="next-content"><div className="next-icon">{active === "english" ? <Languages size={22} /> : <Target size={22} />}</div><div><strong>{current.next}</strong><p>{active === "english" ? "先做论证关系题，再把错句拆成主干和修饰成分。" : "基于本次作答，为你选择最能补齐短板的一组练习。"}</p><span><Clock3 size={14} /> {current.duration}</span></div><button className="play" type="button" onClick={() => setDiagnosed(false)}><Play size={16} fill="currentColor" /></button></div></article></section>
-        <section className="english-lab"><div><p className="eyebrow">ENGLISH I · TODAY&apos;S MICRO LAB</p><h2>英语一：阅读和翻译不该混成同一种练习</h2></div><div className="english-examples"><article><span>READING · 推断题</span><p>“Small experiments matter because they turn a claim into something that can be examined.”</p><strong>问：作者认为小实验最重要的作用是什么？</strong><small>练习：证据链定位 + 同义替换</small></article><article><span>TRANSLATION · 英译汉</span><p>“When evidence is incomplete, a good decision does not wait for perfect certainty; it makes uncertainty visible.”</p><strong>建议：先断句，再确定主干，最后处理让步与抽象名词。</strong><small>练习：长句拆分 + 逻辑显化</small></article></div></section>
-      </div>
-    </section>
-  </main>;
+const tools = [
+  { id: "explain", label: "解释这段" },
+  { id: "argument", label: "拆解论证" },
+  { id: "terms", label: "标出术语" },
+];
+
+export default function Home() {
+  const [activeId, setActiveId] = useState("retrieval");
+  const [tool, setTool] = useState("explain");
+  const [question, setQuestion] = useState("");
+  const [saved, setSaved] = useState(false);
+  const [importedName, setImportedName] = useState("");
+  const document = useMemo(() => documents.find((item) => item.id === activeId) ?? documents[0], [activeId]);
+
+  const response = useMemo(() => {
+    if (question.trim()) {
+      return "先回到这段原文：它主张阅读系统的价值，在于降低“回到证据”的成本，而不是制造更多笔记。你可以进一步追问：作者如何证明这种成本会影响理解？";
+    }
+    if (tool === "argument") {
+      return "主张：阅读系统应帮助人返回证据。\n依据：文档级摘要会丢失“为什么关心这段”的提问语境。\n隐含前提：读者之后会带着新问题回到材料。";
+    }
+    if (tool === "terms") {
+      return "retrieval：按问题取回必要上下文。\nsmallest sufficient context：只提供能支撑当前判断的最小证据片段。\nevidence path：从回答回到原文位置的可追溯路径。";
+    }
+    return "这段在反对“读完就做整篇摘要”。作者认为真正有用的知识单元，是一个可核对的主张、它的原文证据，以及你当时提出的问题。";
+  }, [question, tool]);
+
+  return (
+    <main className="lens-shell">
+      <aside className="lens-rail">
+        <div className="lens-logo" aria-label="Lens 阅读工作台"><span>l</span>ens<i>·</i></div>
+        <nav aria-label="主导航" className="rail-nav">
+          <button className="rail-item active" type="button"><BookOpen size={18} /> 阅读中</button>
+          <button className="rail-item" type="button"><LibraryBig size={18} /> 我的资料</button>
+          <button className="rail-item" type="button"><Highlighter size={18} /> 片段与标注</button>
+          <button className="rail-item" type="button"><Network size={18} /> 关联线索</button>
+        </nav>
+        <div className="rail-foot"><span className="local-dot" /> 本地资料库</div>
+      </aside>
+
+      <section className="lens-main">
+        <header className="lens-topbar">
+          <div className="crumb"><FolderOpen size={15} /> 个人资料库 <span>/</span> 正在阅读</div>
+          <label className="import-button"><Upload size={15} /> 导入资料<input type="file" accept=".pdf,.epub,.txt,.md,image/*" onChange={(event) => setImportedName(event.target.files?.[0]?.name ?? "")} /></label>
+        </header>
+
+        <div className="lens-workspace">
+          <aside className="library-panel">
+            <div className="library-head"><div><p>资料库</p><strong>最近打开</strong></div><button type="button" aria-label="收起资料库"><PanelLeftClose size={17} /></button></div>
+            <label className="search-box"><Search size={15} /><input placeholder="检索标题或内容" aria-label="检索资料" /></label>
+            <div className="document-list">
+              {documents.map((item) => (
+                <button type="button" key={item.id} onClick={() => { setActiveId(item.id); setQuestion(""); setSaved(false); }} className={`document-item ${item.id === activeId ? "selected" : ""}`}>
+                  <FileText size={16} /><span><small>{item.type}</small><strong>{item.title}</strong><em>{item.source}</em></span>
+                </button>
+              ))}
+              {importedName && <div className="imported-file"><Plus size={14} /><span>{importedName}</span><small>待解析</small></div>}
+            </div>
+            <button type="button" className="new-collection"><Plus size={16} /> 新建资料夹</button>
+          </aside>
+
+          <article className="reader-pane">
+            <div className="reader-toolbar"><div><span className="doc-kind">{document.type}</span><span className="doc-source">{document.source}</span></div><div className="reader-actions"><button type="button" aria-label="更多操作"><MoreHorizontal size={18} /></button><button className={saved ? "saved" : ""} type="button" onClick={() => setSaved((value) => !value)}><Bookmark size={15} fill={saved ? "currentColor" : "none"} /> {saved ? "已保存片段" : "保存片段"}</button></div></div>
+            <div className="reader-paper">
+              <div className="reader-title"><p>{document.tag}</p><h1>{document.title}</h1><div><span>阅读视图</span><i /> <span>第 2 页</span><i /> <span>可追溯原文</span></div></div>
+              <section className="reader-body"><h2>{document.heading}</h2>{document.paragraphs.map((paragraph, index) => index === 1 ? <p key={paragraph}><mark>{paragraph}</mark></p> : <p key={paragraph}>{paragraph}</p>)}<blockquote><Quote size={18} /> 这不是摘要卡片。它是一个可以回到原文、继续追问的阅读锚点。</blockquote></section>
+              <div className="reader-page">2</div>
+            </div>
+          </article>
+
+          <aside className="insight-panel">
+            <div className="insight-head"><div><p>选中片段</p><strong>用证据回答</strong></div><span className="source-pill">p. 2</span></div>
+            <blockquote className="selection-quote">“{document.selected}”</blockquote>
+            <div className="tool-row">{tools.map((item) => <button type="button" onClick={() => { setTool(item.id); setQuestion(""); }} className={tool === item.id && !question ? "selected" : ""} key={item.id}>{item.label}</button>)}</div>
+            <section className="answer-card"><div className="answer-label"><Sparkles size={14} /> 阅读助手 <span>依据当前片段</span></div><p>{response}</p><button type="button" className="source-link"><Highlighter size={14} /> 定位到原文第 2 页</button></section>
+            <div className="ask-box"><MessageCircleQuestion size={17} /><textarea value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="围绕这段继续提问…" aria-label="对当前片段提问" /><button type="button" onClick={() => setQuestion((value) => value || "这段论证缺少什么证据？")} aria-label="发送问题"><Send size={15} /></button></div>
+            <p className="evidence-note">回答固定附着在本段原文；跨文档检索将作为下一步能力接入。</p>
+          </aside>
+        </div>
+      </section>
+    </main>
+  );
 }

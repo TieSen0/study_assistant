@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "研 Lens · 考研全科智能诊断",
-  description: "政治、英语一、数学一与 11408 的智能学习诊断演示。",
+  title: "Lens · 个人阅读工作台",
+  description: "让论文、书籍与笔记变成可追溯、可提问的个人资料库。",
   other: {
     "codex-preview": "development",
   },
