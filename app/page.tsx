@@ -1,5 +1,6 @@
 "use client";
 
+import "./import-status.css";
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import {
   BookOpen,
@@ -116,6 +117,7 @@ export default function Home() {
   const [saved, setSaved] = useState(false);
   const [uploadState, setUploadState] = useState<"idle" | "extracting" | "uploading">("idle");
   const [uploadMessage, setUploadMessage] = useState("上传 PDF、TXT 或 Markdown，资料会保存在你的私有资料库。");
+  const [uploadKind, setUploadKind] = useState<"hint" | "working" | "success" | "error">("hint");
 
   const library = [...remoteDocuments, ...sampleDocuments];
   const page = activeDocument.pages[activePage] ?? activeDocument.pages[0];
@@ -126,7 +128,10 @@ export default function Home() {
     fetch("/api/documents")
       .then((response) => response.ok ? response.json() : Promise.reject())
       .then((data) => setRemoteDocuments((data.documents ?? []).map((item: RemoteDocument) => remoteToDocument(item))))
-      .catch(() => setUploadMessage("资料库暂不可用；示例材料仍可正常阅读。"));
+      .catch(() => {
+        setUploadKind("error");
+        setUploadMessage("资料库暂不可用；示例材料仍可正常阅读。");
+      });
   }, []);
 
   const response = useMemo(() => {
@@ -151,6 +156,7 @@ export default function Home() {
       setActiveDocument(document);
       return;
     }
+    setUploadKind("working");
     setUploadMessage("正在打开已保存的资料…");
     try {
       const response = await fetch(`/api/documents/${document.id}`);
@@ -159,8 +165,10 @@ export default function Home() {
       const opened = remoteToDocument(data.document as RemoteDocument, (data.pages ?? []).map((item: { page_number: number; content: string }) => ({ pageNumber: item.page_number, content: item.content })));
       setRemoteDocuments((items) => items.map((item) => item.id === opened.id ? opened : item));
       setActiveDocument(opened);
-      setUploadMessage("资料已从私有资料库打开。点击任一段文字即可更换当前证据。 ");
+      setUploadKind("success");
+      setUploadMessage("资料已打开。点击任一段文字即可更换当前证据。");
     } catch (error) {
+      setUploadKind("error");
       setUploadMessage(error instanceof Error ? error.message : "无法打开资料。 ");
     }
   }
@@ -170,12 +178,14 @@ export default function Home() {
     event.target.value = "";
     if (!file) return;
     if (file.size > 20 * 1024 * 1024) {
+      setUploadKind("error");
       setUploadMessage("文件超过 20 MB，请先拆分或压缩后再上传。 ");
       return;
     }
     try {
       setUploadState("extracting");
-      setUploadMessage("正在提取页面文字和页码…");
+      setUploadKind("working");
+      setUploadMessage(`正在读取「${file.name}」并提取页面文字…`);
       const pages = await extractPages(file);
       if (!pages.length) throw new Error("没有提取到文字；扫描版 PDF 需要先经过 OCR。 ");
       setUploadState("uploading");
@@ -192,9 +202,12 @@ export default function Home() {
       setActivePage(0);
       setSelectedText("");
       setQuestion("");
+      setUploadKind("success");
       setUploadMessage(`已保存「${document.title}」：${pages.length} 页文字可直接阅读和提问。`);
     } catch (error) {
-      setUploadMessage(error instanceof Error ? error.message : "资料导入失败。 ");
+      setUploadKind("error");
+      const reason = error instanceof Error ? error.message : "资料导入失败。";
+      setUploadMessage(`没有导入成功：${reason}`);
     } finally {
       setUploadState("idle");
     }
@@ -219,6 +232,11 @@ export default function Home() {
           <label className={`import-button ${uploadState !== "idle" ? "busy" : ""}`}><Upload size={15} /> {uploadState === "idle" ? "导入资料" : "正在处理"}<input type="file" accept="application/pdf,text/plain,text/markdown,.pdf,.txt,.md" disabled={uploadState !== "idle"} onChange={handleUpload} /></label>
         </header>
 
+        <div className={`import-status ${uploadKind}`} role="status" aria-live="polite">
+          {uploadState !== "idle" && <LoaderCircle size={16} className="inline-loader" />}
+          <span>{uploadMessage}</span>
+        </div>
+
         <div className="lens-workspace">
           <aside className="library-panel">
             <div className="library-head"><div><p>资料库</p><strong>最近打开</strong></div><button type="button" aria-label="收起资料库"><PanelLeftClose size={17} /></button></div>
@@ -234,6 +252,7 @@ export default function Home() {
           </aside>
 
           <article className="reader-pane">
+            {uploadState !== "idle" && <div className="upload-overlay"><LoaderCircle size={24} className="inline-loader" /><strong>{uploadState === "extracting" ? "正在解析文章" : "正在保存资料"}</strong><span>请保持此页面打开，完成后会自动切换到文章正文。</span></div>}
             <div className="reader-toolbar"><div><span className="doc-kind">{activeDocument.type}</span><span className="doc-source">{activeDocument.source}</span></div><div className="reader-actions"><button type="button" aria-label="更多操作"><MoreHorizontal size={18} /></button>{activeDocument.isRemote && <a href={`/api/documents/${activeDocument.id}/file`} target="_blank" rel="noreferrer">原始文件</a>}<button className={saved ? "saved" : ""} type="button" onClick={() => setSaved((value) => !value)}><Bookmark size={15} fill={saved ? "currentColor" : "none"} /> {saved ? "已保存片段" : "保存片段"}</button></div></div>
             <div className="reader-paper">
               <div className="reader-title"><p>{activeDocument.tag}</p><h1>{activeDocument.title}</h1><div><span>阅读视图</span><i /> <span>第 {page?.pageNumber ?? 1} 页</span><i /> <span>可追溯原文</span></div></div>
