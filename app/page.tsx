@@ -207,7 +207,10 @@ export default function Home() {
       setPendingAnchor(null);
       setAnnotationMessage(`已添加${label}。`);
       setSelectedText(`第 ${page.pageNumber} 页的${label}区域`);
-      if (kind === "question") setQuestion(note || `请解释第 ${page.pageNumber} 页这个选区。`);
+      if (kind === "question") {
+        setReadingMode(false);
+        setQuestion(note || `请解释第 ${page.pageNumber} 页这个选区。`);
+      }
     } catch (error) {
       setAnnotationMessage(error instanceof Error ? error.message : "无法保存标记。 ");
     }
