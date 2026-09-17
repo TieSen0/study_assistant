@@ -45,10 +45,9 @@ export async function POST(request: Request) {
       .map((page, index) => ({
         pageNumber: Number.isInteger(page.pageNumber) ? page.pageNumber : index + 1,
         content: String(page.content ?? "").replace(/\s+/g, " ").trim().slice(0, 60_000),
-      }))
-      .filter((page) => page.content.length > 0);
+      }));
     if (!normalized.length) {
-      return Response.json({ error: "资料中没有可读取的文字；扫描件需要先经过 OCR。" }, { status: 400 });
+      return Response.json({ error: "资料中没有可读取的页面。" }, { status: 400 });
     }
 
     const { db, bucket } = storage();

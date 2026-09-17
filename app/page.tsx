@@ -34,6 +34,7 @@ type ReadingDocument = {
   tag: string;
   pages: ReadingPage[];
   isRemote?: boolean;
+  mimeType?: string;
 };
 
 type RemoteDocument = { id: string; title: string; mime_type: string; page_count: number; created_at: string };
@@ -88,7 +89,9 @@ async function extractPages(file: File): Promise<ReadingPage[]> {
         .join(" ")
         .replace(/\s+/g, " ")
         .trim();
-      if (content) pages.push({ pageNumber, content });
+      // Keep an entry for every original page. An empty text layer is useful
+      // debug information, not a reason to hide a scanned PDF from the reader.
+      pages.push({ pageNumber, content });
     }
     return pages;
   }
@@ -107,6 +110,7 @@ function remoteToDocument(item: RemoteDocument, pages: ReadingPage[] = []): Read
     tag: "我的资料",
     pages,
     isRemote: true,
+    mimeType: item.mime_type,
   };
 }
 
@@ -121,11 +125,14 @@ export default function Home() {
   const [uploadState, setUploadState] = useState<"idle" | "extracting" | "uploading">("idle");
   const [uploadMessage, setUploadMessage] = useState("上传 PDF、TXT 或 Markdown，资料会保存在你的私有资料库。");
   const [uploadKind, setUploadKind] = useState<"hint" | "working" | "success" | "error">("hint");
+  const [showDebug, setShowDebug] = useState(false);
 
   const library = [...remoteDocuments, ...sampleDocuments];
   const page = activeDocument.pages[activePage] ?? activeDocument.pages[0];
   const paragraphs = useMemo(() => (page ? splitParagraphs(page.content) : []), [page]);
   const selection = selectedText || paragraphs[0] || "请选择一段原文。";
+  const isOriginalPdf = activeDocument.isRemote && activeDocument.mimeType === "application/pdf";
+  const extractedPages = activeDocument.pages.filter((item) => item.content.trim().length > 0).length;
 
   useEffect(() => {
     fetch("/api/documents")
@@ -155,6 +162,7 @@ export default function Home() {
     setSelectedText("");
     setSaved(false);
     setActivePage(0);
+    setShowDebug(false);
     if (!document.isRemote || document.pages.length) {
       setActiveDocument(document);
       return;
@@ -169,7 +177,7 @@ export default function Home() {
       setRemoteDocuments((items) => items.map((item) => item.id === opened.id ? opened : item));
       setActiveDocument(opened);
       setUploadKind("success");
-      setUploadMessage("资料已打开。点击任一段文字即可更换当前证据。");
+      setUploadMessage("资料已打开。阅读区展示原始文件；需要核对解析结果时可打开 Debug。 ");
     } catch (error) {
       setUploadKind("error");
       setUploadMessage(error instanceof Error ? error.message : "无法打开资料。 ");
@@ -190,7 +198,7 @@ export default function Home() {
       setUploadKind("working");
       setUploadMessage(`正在读取「${file.name}」并提取页面文字…`);
       const pages = await extractPages(file);
-      if (!pages.length) throw new Error("没有提取到文字；扫描版 PDF 需要先经过 OCR。 ");
+      if (!pages.length) throw new Error("文件中没有可读取的页面。 ");
       setUploadState("uploading");
       setUploadMessage(`已提取 ${pages.length} 页，正在安全保存原文件与页面文本…`);
       const form = new FormData();
@@ -206,7 +214,9 @@ export default function Home() {
       setSelectedText("");
       setQuestion("");
       setUploadKind("success");
-      setUploadMessage(`已保存「${document.title}」：${pages.length} 页文字可直接阅读和提问。`);
+      setShowDebug(false);
+      const readablePages = pages.filter((item) => item.content.trim().length > 0).length;
+      setUploadMessage(`已保存「${document.title}」：原始文件将直接显示；后台从 ${readablePages}/${pages.length} 页提取到文字。`);
     } catch (error) {
       setUploadKind("error");
       const reason = error instanceof Error ? error.message : "资料导入失败。";
@@ -256,16 +266,17 @@ export default function Home() {
 
           <article className="reader-pane">
             {uploadState !== "idle" && <div className="upload-overlay"><LoaderCircle size={24} className="inline-loader" /><strong>{uploadState === "extracting" ? "正在解析文章" : "正在保存资料"}</strong><span>请保持此页面打开，完成后会自动切换到文章正文。</span></div>}
-            <div className="reader-toolbar"><div><span className="doc-kind">{activeDocument.type}</span><span className="doc-source">{activeDocument.source}</span></div><div className="reader-actions"><button type="button" aria-label="更多操作"><MoreHorizontal size={18} /></button>{activeDocument.isRemote && <a href={`/api/documents/${activeDocument.id}/file`} target="_blank" rel="noreferrer">原始文件</a>}<button className={saved ? "saved" : ""} type="button" onClick={() => setSaved((value) => !value)}><Bookmark size={15} fill={saved ? "currentColor" : "none"} /> {saved ? "已保存片段" : "保存片段"}</button></div></div>
+            <div className="reader-toolbar"><div><span className="doc-kind">{activeDocument.type}</span><span className="doc-source">{activeDocument.source}</span></div><div className="reader-actions"><button type="button" aria-label="更多操作"><MoreHorizontal size={18} /></button>{activeDocument.isRemote && <button type="button" className={showDebug ? "debug-active" : ""} onClick={() => setShowDebug((value) => !value)}>解析 Debug</button>}{activeDocument.isRemote && <a href={`/api/documents/${activeDocument.id}/file`} target="_blank" rel="noreferrer">新窗口打开</a>}<button className={saved ? "saved" : ""} type="button" onClick={() => setSaved((value) => !value)}><Bookmark size={15} fill={saved ? "currentColor" : "none"} /> {saved ? "已保存片段" : "保存片段"}</button></div></div>
             <div className="reader-paper">
               <div className="reader-title"><p>{activeDocument.tag}</p><h1>{activeDocument.title}</h1><div><span>阅读视图</span><i /> <span>第 {page?.pageNumber ?? 1} 页</span><i /> <span>可追溯原文</span></div></div>
-              <section className="reader-body"><h2>{activeDocument.isRemote ? "已解析的原文" : "阅读示例"}{uploadState === "extracting" && <LoaderCircle className="inline-loader" size={17} />}</h2>{paragraphs.map((paragraph, index) => <p className={selection === paragraph ? "chosen" : ""} onClick={() => { setSelectedText(paragraph); setQuestion(""); }} key={`${page?.pageNumber}-${index}`}>{selection === paragraph ? <mark>{paragraph}</mark> : paragraph}</p>)}<blockquote><Quote size={18} /> 点击一段文字，即可把右侧回答固定到这一页的原文证据。</blockquote></section>
+              {isOriginalPdf ? <section className="raw-pdf-shell"><iframe key={`${activeDocument.id}-${page?.pageNumber}`} title={`${activeDocument.title} 原始 PDF`} src={`/api/documents/${activeDocument.id}/file#page=${page?.pageNumber ?? 1}`} /><p>此处为未加工的原始 PDF。缩放、查找和翻页可直接使用阅读器内的控件。</p></section> : <section className="reader-body"><h2>{activeDocument.isRemote ? "原始文本" : "阅读示例"}{uploadState === "extracting" && <LoaderCircle className="inline-loader" size={17} />}</h2>{paragraphs.map((paragraph, index) => <p className={selection === paragraph ? "chosen" : ""} onClick={() => { setSelectedText(paragraph); setQuestion(""); }} key={`${page?.pageNumber}-${index}`}>{selection === paragraph ? <mark>{paragraph}</mark> : paragraph}</p>)}<blockquote><Quote size={18} /> 点击一段文字，即可把右侧回答固定到这一页的原文证据。</blockquote></section>}
+              {showDebug && activeDocument.isRemote && <section className="debug-panel"><div><span>后台解析 Debug</span><small>普通模式 · 第 {page?.pageNumber ?? 1} 页 · 已识别文字页 {extractedPages}/{activeDocument.pages.length}</small></div><pre>{page?.content || "此页没有可提取的文字层。原始 PDF 仍保持完整；可在后续使用增强识别。"}</pre></section>}
               <div className="page-nav"><button type="button" disabled={activePage === 0} onClick={() => { setActivePage((value) => value - 1); setSelectedText(""); }}><ChevronLeft size={16} /> 上一页</button><span>{activePage + 1} / {activeDocument.pages.length || 1}</span><button type="button" disabled={activePage >= activeDocument.pages.length - 1} onClick={() => { setActivePage((value) => value + 1); setSelectedText(""); }}>下一页 <ChevronRight size={16} /></button></div>
             </div>
           </article>
 
           <aside className="insight-panel">
-            <div className="insight-head"><div><p>选中片段</p><strong>用证据回答</strong></div><span className="source-pill">p. {page?.pageNumber ?? 1}</span></div>
+            <div className="insight-head"><div><p>{isOriginalPdf ? "后台文本索引" : "选中片段"}</p><strong>用证据回答</strong></div><span className="source-pill">p. {page?.pageNumber ?? 1}</span></div>
             <blockquote className="selection-quote">“{selection}”</blockquote>
             <div className="tool-row">{tools.map((item) => <button type="button" onClick={() => { setTool(item.id); setQuestion(""); }} className={tool === item.id && !question ? "selected" : ""} key={item.id}>{item.label}</button>)}</div>
             <section className="answer-card"><div className="answer-label"><Sparkles size={14} /> 阅读助手 <span>依据当前片段</span></div><p>{response}</p><button type="button" className="source-link" onClick={() => document.querySelector(".chosen")?.scrollIntoView({ behavior: "smooth", block: "center" })}><Highlighter size={14} /> 定位到原文第 {page?.pageNumber ?? 1} 页</button></section>
