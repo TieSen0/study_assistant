@@ -50,17 +50,30 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   try {
     if (!env.DB) throw new Error("批注资料库暂不可用，请稍后重试。");
     const { id: documentId } = await context.params;
-    const body = await request.json() as { id?: unknown; status?: unknown };
+    const body = await request.json() as { id?: unknown; status?: unknown; note?: unknown };
     if (typeof body.id !== "string" || !["open", "resolved"].includes(String(body.status))) {
       return Response.json({ error: "批注状态无效。" }, { status: 400 });
     }
     const resolvedAt = body.status === "resolved" ? new Date().toISOString() : null;
     await env.DB
-      .prepare("UPDATE reading_annotations SET status = ?, resolved_at = ? WHERE id = ? AND document_id = ?")
-      .bind(body.status, resolvedAt, body.id, documentId)
+      .prepare("UPDATE reading_annotations SET status = ?, resolved_at = ?, note = COALESCE(?, note) WHERE id = ? AND document_id = ?")
+      .bind(body.status, resolvedAt, typeof body.note === "string" ? body.note.trim().slice(0, 2_000) : null, body.id, documentId)
       .run();
     return Response.json({ ok: true, status: body.status, resolved_at: resolvedAt });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "无法更新批注。" }, { status: 500 });
+  }
+}
+
+export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
+  try {
+    if (!env.DB) throw new Error("批注资料库暂不可用，请稍后重试。");
+    const { id: documentId } = await context.params;
+    const body = await request.json() as { id?: unknown };
+    if (typeof body.id !== "string") return Response.json({ error: "缺少批注编号。" }, { status: 400 });
+    await env.DB.prepare("DELETE FROM reading_annotations WHERE id = ? AND document_id = ?").bind(body.id, documentId).run();
+    return Response.json({ ok: true });
+  } catch (error) {
+    return Response.json({ error: error instanceof Error ? error.message : "无法删除批注。" }, { status: 500 });
   }
 }

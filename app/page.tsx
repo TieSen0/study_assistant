@@ -227,6 +227,45 @@ export default function Home() {
     }
   }
 
+  async function editAnnotation(annotation: ReadingAnnotation) {
+    const note = window.prompt("编辑标记内容：", annotation.note);
+    if (note === null) return;
+    const response = await fetch(`/api/documents/${activeDocument.id}/annotations`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: annotation.id, status: annotation.status, note }) });
+    if (!response.ok) return setAnnotationMessage("无法编辑标记。 ");
+    setAnnotations((items) => items.map((item) => item.id === annotation.id ? { ...item, note } : item));
+  }
+
+  async function deleteAnnotation(annotation: ReadingAnnotation) {
+    if (!window.confirm("删除这个标记吗？此操作不可恢复。")) return;
+    const response = await fetch(`/api/documents/${activeDocument.id}/annotations`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: annotation.id }) });
+    if (!response.ok) return setAnnotationMessage("无法删除标记。 ");
+    setAnnotations((items) => items.filter((item) => item.id !== annotation.id));
+  }
+
+  async function renameDocument() {
+    if (!activeDocument.isRemote) return;
+    const title = window.prompt("资料标题：", activeDocument.title)?.trim();
+    if (!title || title === activeDocument.title) return;
+    const response = await fetch(`/api/documents/${activeDocument.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title }) });
+    if (!response.ok) return setUploadMessage("无法修改资料标题。 ");
+    setActiveDocument((item) => ({ ...item, title }));
+    setRemoteDocuments((items) => items.map((item) => item.id === activeDocument.id ? { ...item, title } : item));
+    setUploadKind("success");
+    setUploadMessage("资料标题已更新。 ");
+  }
+
+  async function deleteDocument() {
+    if (!activeDocument.isRemote || !window.confirm(`删除「${activeDocument.title}」及其所有标记吗？此操作不可恢复。`)) return;
+    const id = activeDocument.id;
+    const response = await fetch(`/api/documents/${id}`, { method: "DELETE" });
+    if (!response.ok) return setUploadMessage("无法删除资料。 ");
+    setRemoteDocuments((items) => items.filter((item) => item.id !== id));
+    setActiveDocument(sampleDocuments[0]);
+    setActivePage(0);
+    setUploadKind("success");
+    setUploadMessage("资料及其标记已删除。 ");
+  }
+
   function jumpTo(annotation: ReadingAnnotation) {
     const index = activeDocument.pages.findIndex((item) => item.pageNumber === annotation.page_number);
     if (index >= 0) setActivePage(index);
@@ -343,7 +382,7 @@ export default function Home() {
 
           <article className="reader-pane">
             {uploadState !== "idle" && <div className="upload-overlay"><LoaderCircle size={24} className="inline-loader" /><strong>{uploadState === "extracting" ? "正在解析文章" : "正在保存资料"}</strong><span>请保持此页面打开，完成后会自动切换到文章正文。</span></div>}
-            <div className="reader-toolbar"><div><span className="doc-kind">{activeDocument.type}</span><span className="doc-source">{activeDocument.source}</span></div><div className="reader-actions"><button type="button" aria-label="更多操作"><MoreHorizontal size={18} /></button>{activeDocument.isRemote && <button type="button" className={showDebug ? "debug-active" : ""} onClick={() => setShowDebug((value) => !value)}>解析 Debug</button>}{activeDocument.isRemote && <a href={`/api/documents/${activeDocument.id}/file`} target="_blank" rel="noreferrer">新窗口打开</a>}<button className={saved ? "saved" : ""} type="button" onClick={() => setSaved((value) => !value)}><Bookmark size={15} fill={saved ? "currentColor" : "none"} /> {saved ? "已保存片段" : "保存片段"}</button></div></div>
+            <div className="reader-toolbar"><div><span className="doc-kind">{activeDocument.type}</span><span className="doc-source">{activeDocument.source}</span></div><div className="reader-actions"><button type="button" aria-label="更多操作"><MoreHorizontal size={18} /></button>{activeDocument.isRemote && <button type="button" onClick={renameDocument}>重命名</button>}{activeDocument.isRemote && <button type="button" className={showDebug ? "debug-active" : ""} onClick={() => setShowDebug((value) => !value)}>解析 Debug</button>}{activeDocument.isRemote && <a href={`/api/documents/${activeDocument.id}/file`} target="_blank" rel="noreferrer">新窗口打开</a>}{activeDocument.isRemote && <button type="button" className="danger-action" onClick={deleteDocument}>删除资料</button>}<button className={saved ? "saved" : ""} type="button" onClick={() => setSaved((value) => !value)}><Bookmark size={15} fill={saved ? "currentColor" : "none"} /> {saved ? "已保存片段" : "保存片段"}</button></div></div>
             <div className="reader-paper">
               <div className="reader-title"><p>{activeDocument.tag}</p><h1>{activeDocument.title}</h1><div><span>阅读视图</span><i /> <span>第 {page?.pageNumber ?? 1} 页</span><i /> <span>可追溯原文</span></div></div>
               {isOriginalPdf ? <><OriginalPdfReader documentId={activeDocument.id} pageNumber={page?.pageNumber ?? 1} zoom={1.25} marks={pageAnnotations.map((item) => ({ id: item.id, kind: item.kind, anchor: item.anchor, status: item.status }))} onSelection={(anchor) => { setPendingAnchor(anchor); setSelectedText(`第 ${page?.pageNumber ?? 1} 页的已选区域`); setAnnotationMessage("已选择区域。选择一个操作以保存。 "); }} />{pendingAnchor && <div className="selection-action-bar"><span>已选中区域</span><button type="button" onClick={() => saveAnnotation("note")}>批注</button><button type="button" onClick={() => saveAnnotation("question")}>询问</button><button type="button" onClick={() => saveAnnotation("doubt")}>存疑</button><button type="button" onClick={() => saveAnnotation("bookmark")}>书签</button><button type="button" className="cancel" onClick={() => setPendingAnchor(null)}>取消</button></div>}</> : <section className="reader-body"><h2>{activeDocument.isRemote ? "原始文本" : "阅读示例"}{uploadState === "extracting" && <LoaderCircle className="inline-loader" size={17} />}</h2>{paragraphs.map((paragraph, index) => <p className={selection === paragraph ? "chosen" : ""} onClick={() => { setSelectedText(paragraph); setQuestion(""); }} key={`${page?.pageNumber}-${index}`}>{selection === paragraph ? <mark>{paragraph}</mark> : paragraph}</p>)}<blockquote><Quote size={18} /> 点击一段文字，即可把右侧回答固定到这一页的原文证据。</blockquote></section>}
@@ -355,7 +394,7 @@ export default function Home() {
           <aside className="insight-panel">
             <div className="insight-head"><div><p>{isOriginalPdf ? "后台文本索引" : "选中片段"}</p><strong>用证据回答</strong></div><span className="source-pill">p. {page?.pageNumber ?? 1}</span></div>
             <blockquote className="selection-quote">“{selection}”</blockquote>
-            {isOriginalPdf && <section className="mark-summary"><div className="mark-summary-head"><strong>存疑队列</strong><span>{openDoubts.length} 条未解决</span></div>{openDoubts.length ? <div className="doubt-list">{openDoubts.map((item) => <div className="doubt-item" key={item.id}><button type="button" onClick={() => jumpTo(item)}>p. {item.page_number} · {item.note || "未写说明的存疑点"}</button><button type="button" onClick={() => setDoubtStatus(item)}>解决</button></div>)}</div> : <p className="empty-marks">框选原文后点“存疑”，它会出现在这里。</p>}<div className="mark-summary-head page-marks"><strong>本页标记</strong><span>{pageAnnotations.length} 个</span></div>{pageAnnotations.map((item) => <div className="page-mark" key={item.id}><span className={`mark-dot ${item.kind}`} /> <b>{item.kind === "note" ? "批注" : item.kind === "question" ? "询问" : item.kind === "doubt" ? "存疑" : "书签"}</b><em>{item.note || "无文字说明"}</em></div>)}</section>}
+            {isOriginalPdf && <section className="mark-summary"><div className="mark-summary-head"><strong>存疑队列</strong><span>{openDoubts.length} 条未解决</span></div>{openDoubts.length ? <div className="doubt-list">{openDoubts.map((item) => <div className="doubt-item" key={item.id}><button type="button" onClick={() => jumpTo(item)}>p. {item.page_number} · {item.note || "未写说明的存疑点"}</button><button type="button" onClick={() => setDoubtStatus(item)}>解决</button></div>)}</div> : <p className="empty-marks">框选原文后点“存疑”，它会出现在这里。</p>}<div className="mark-summary-head page-marks"><strong>本页标记</strong><span>{pageAnnotations.length} 个</span></div>{pageAnnotations.map((item) => <div className="page-mark" key={item.id}><span className={`mark-dot ${item.kind}`} /> <button type="button" onClick={() => jumpTo(item)}><b>{item.kind === "note" ? "批注" : item.kind === "question" ? "询问" : item.kind === "doubt" ? "存疑" : "书签"}</b><em>{item.note || "无文字说明"}</em></button><span className="mark-row-actions"><button type="button" onClick={() => editAnnotation(item)}>改</button><button type="button" onClick={() => deleteAnnotation(item)}>删</button></span></div>)}</section>}
             <div className="tool-row">{tools.map((item) => <button type="button" onClick={() => { setTool(item.id); setQuestion(""); }} className={tool === item.id && !question ? "selected" : ""} key={item.id}>{item.label}</button>)}</div>
             <section className="answer-card"><div className="answer-label"><Sparkles size={14} /> 阅读助手 <span>依据当前片段</span></div><p>{response}</p><button type="button" className="source-link" onClick={() => document.querySelector(".chosen")?.scrollIntoView({ behavior: "smooth", block: "center" })}><Highlighter size={14} /> 定位到原文第 {page?.pageNumber ?? 1} 页</button></section>
             <div className="ask-box"><MessageCircleQuestion size={17} /><textarea value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="围绕这段继续提问…" aria-label="对当前片段提问" /><button type="button" onClick={() => setQuestion((value) => value || "这段论证还缺少什么证据？")} aria-label="发送问题"><Send size={15} /></button></div>
