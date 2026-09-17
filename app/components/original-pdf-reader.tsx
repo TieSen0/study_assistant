@@ -51,7 +51,7 @@ export function OriginalPdfReader({
       try {
         const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
         pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerSrc;
-        const pdf = await pdfjs.getDocument(`/api/documents/${documentId}/file`).promise;
+        const pdf = await pdfjs.getDocument({ url: `/api/documents/${documentId}/file` }).promise;
         const pdfPage = await pdf.getPage(pageNumber);
         const viewport = pdfPage.getViewport({ scale: zoom });
         const canvas = canvasRef.current;
