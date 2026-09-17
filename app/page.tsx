@@ -175,6 +175,18 @@ export default function Home() {
       .catch(() => setAnnotationMessage("批注暂时无法载入。"));
   }, [activeDocument.id, activeDocument.isRemote]);
 
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      const tag = (event.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      if (event.key === "ArrowLeft" && activePage > 0) setActivePage((value) => value - 1);
+      if (event.key === "ArrowRight" && activePage < activeDocument.pages.length - 1) setActivePage((value) => value + 1);
+      if (event.key === "Escape") setReadingMode(false);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [activePage, activeDocument.pages.length]);
+
   const response = useMemo(() => {
     if (question.trim()) {
       return `你正在问：“${question.trim()}”。当前版本先固定回答于已选原文：它强调的核心是“${selection.slice(0, 96)}${selection.length > 96 ? "…" : ""}”。模型式追问会在后续接入，但不会脱离这段证据。`;
