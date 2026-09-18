@@ -217,12 +217,12 @@ export default function Home() {
   const pageAnnotations = annotations.filter((item) => item.page_number === page?.pageNumber);
   const openDoubts = annotations.filter((item) => item.kind === "doubt" && item.status === "open");
 
-  async function saveAnnotation(kind: AnnotationKind, suppliedAnchor?: PdfAnchor, suppliedPageNumber?: number) {
+  async function saveAnnotation(kind: AnnotationKind, suppliedAnchor?: PdfAnchor, suppliedPageNumber?: number, options: { note?: string; stayInReader?: boolean } = {}) {
     const anchor = suppliedAnchor ?? pendingAnchor;
     const pageNumber = suppliedPageNumber ?? page?.pageNumber;
     if (!activeDocument.isRemote || !anchor || !pageNumber) return;
     const label = kind === "note" ? "批注" : kind === "doubt" ? "存疑" : kind === "question" ? "询问" : "书签";
-    const note = kind === "bookmark" ? "" : window.prompt(`${label}内容（可留空）：`) ?? "";
+    const note = kind === "bookmark" ? "" : options.note ?? window.prompt(`${label}内容（可留空）：`) ?? "";
     try {
       setAnnotationMessage(`正在保存${label}…`);
       const response = await fetch(`/api/documents/${activeDocument.id}/annotations`, {
@@ -237,7 +237,7 @@ export default function Home() {
       setPendingAnchor(null);
       setAnnotationMessage(`已添加${label}。`);
       setSelectedText(`第 ${pageNumber} 页的${label}区域`);
-      if (kind === "question") {
+      if (kind === "question" && !options.stayInReader) {
         setReadingMode(false);
         setQuestion(note || `请解释第 ${pageNumber} 页这个选区。`);
       }
@@ -388,6 +388,7 @@ export default function Home() {
         if (index >= 0) setActivePage(index);
       }}
       onCreateMark={(kind, pageNumber, anchor) => saveAnnotation(kind, anchor, pageNumber)}
+      onAsk={(pageNumber, anchor, question) => saveAnnotation("question", anchor, pageNumber, { note: question, stayInReader: true })}
       onEditMark={(id) => {
         const annotation = annotations.find((item) => item.id === id);
         if (annotation) editAnnotation(annotation);

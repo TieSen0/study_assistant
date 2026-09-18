@@ -19,6 +19,7 @@ export type ReaderProps = {
   onExit: () => void;
   onPageChange: (pageNumber: number) => void;
   onCreateMark: (kind: ReaderMarkKind, pageNumber: number, anchor: PdfAnchor) => void;
+  onAsk: (pageNumber: number, anchor: PdfAnchor, question: string) => void;
   onEditMark: (id: string) => void;
   onDeleteMark: (id: string) => void;
   onSetDoubtStatus: (id: string) => void;
