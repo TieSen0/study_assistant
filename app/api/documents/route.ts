@@ -17,7 +17,7 @@ export async function GET() {
   try {
     const { db } = storage();
     const result = await db
-      .prepare("SELECT id, title, mime_type, page_count, created_at FROM reading_documents ORDER BY created_at DESC LIMIT 30")
+      .prepare("SELECT id, title, mime_type, page_count, last_page, created_at FROM reading_documents ORDER BY created_at DESC LIMIT 30")
       .all();
     return Response.json({ documents: result.results });
   } catch (error) {

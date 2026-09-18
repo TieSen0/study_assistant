@@ -1,0 +1,1 @@
+ALTER TABLE `reading_documents` ADD `last_page` integer DEFAULT 1 NOT NULL;

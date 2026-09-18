@@ -4,6 +4,7 @@ import "./import-status.css";
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import pdfWorkerSrc from "pdfjs-dist/legacy/build/pdf.worker.mjs?url";
 import { OriginalPdfReader, PdfAnchor, PdfMark } from "./components/original-pdf-reader";
+import { OfficePdfReader } from "./components/office-pdf-reader";
 import {
   BookOpen,
   Bookmark,
@@ -36,9 +37,10 @@ type ReadingDocument = {
   pages: ReadingPage[];
   isRemote?: boolean;
   mimeType?: string;
+  lastPage?: number;
 };
 
-type RemoteDocument = { id: string; title: string; mime_type: string; page_count: number; created_at: string };
+type RemoteDocument = { id: string; title: string; mime_type: string; page_count: number; last_page?: number; created_at: string };
 type AnnotationKind = "note" | "question" | "doubt" | "bookmark";
 type ReadingAnnotation = PdfMark & { document_id: string; page_number: number; note: string; created_at: string; resolved_at: string | null };
 
@@ -123,6 +125,7 @@ function remoteToDocument(item: RemoteDocument, pages: ReadingPage[] = []): Read
     pages,
     isRemote: true,
     mimeType: item.mime_type,
+    lastPage: item.last_page,
   };
 }
 
@@ -140,6 +143,7 @@ export default function Home() {
   const [showDebug, setShowDebug] = useState(false);
   const [readingMode, setReadingMode] = useState(false);
   const [annotationMode, setAnnotationMode] = useState(false);
+  const [quickZoom, setQuickZoom] = useState("page-width");
   const [annotations, setAnnotations] = useState<ReadingAnnotation[]>([]);
   const [pendingAnchor, setPendingAnchor] = useState<PdfAnchor | null>(null);
   const [annotationMessage, setAnnotationMessage] = useState("");
@@ -187,6 +191,14 @@ export default function Home() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [activePage, activeDocument.pages.length]);
 
+  useEffect(() => {
+    if (!activeDocument.isRemote || !page) return;
+    const timer = window.setTimeout(() => {
+      fetch(`/api/documents/${activeDocument.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lastPage: page.pageNumber }) }).catch(() => undefined);
+    }, 600);
+    return () => window.clearTimeout(timer);
+  }, [activeDocument.id, activeDocument.isRemote, page?.pageNumber]);
+
   const response = useMemo(() => {
     if (question.trim()) {
       return `你正在问：“${question.trim()}”。当前版本先固定回答于已选原文：它强调的核心是“${selection.slice(0, 96)}${selection.length > 96 ? "…" : ""}”。模型式追问会在后续接入，但不会脱离这段证据。`;
@@ -203,8 +215,10 @@ export default function Home() {
   const pageAnnotations = annotations.filter((item) => item.page_number === page?.pageNumber);
   const openDoubts = annotations.filter((item) => item.kind === "doubt" && item.status === "open");
 
-  async function saveAnnotation(kind: AnnotationKind) {
-    if (!activeDocument.isRemote || !pendingAnchor || !page) return;
+  async function saveAnnotation(kind: AnnotationKind, suppliedAnchor?: PdfAnchor, suppliedPageNumber?: number) {
+    const anchor = suppliedAnchor ?? pendingAnchor;
+    const pageNumber = suppliedPageNumber ?? page?.pageNumber;
+    if (!activeDocument.isRemote || !anchor || !pageNumber) return;
     const label = kind === "note" ? "批注" : kind === "doubt" ? "存疑" : kind === "question" ? "询问" : "书签";
     const note = kind === "bookmark" ? "" : window.prompt(`${label}内容（可留空）：`) ?? "";
     try {
@@ -212,7 +226,7 @@ export default function Home() {
       const response = await fetch(`/api/documents/${activeDocument.id}/annotations`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pageNumber: page.pageNumber, kind, anchor: pendingAnchor, note }),
+        body: JSON.stringify({ pageNumber, kind, anchor, note }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "无法保存标记。 ");
@@ -220,10 +234,10 @@ export default function Home() {
       setAnnotations((items) => [...items, annotation]);
       setPendingAnchor(null);
       setAnnotationMessage(`已添加${label}。`);
-      setSelectedText(`第 ${page.pageNumber} 页的${label}区域`);
+      setSelectedText(`第 ${pageNumber} 页的${label}区域`);
       if (kind === "question") {
         setReadingMode(false);
-        setQuestion(note || `请解释第 ${page.pageNumber} 页这个选区。`);
+        setQuestion(note || `请解释第 ${pageNumber} 页这个选区。`);
       }
     } catch (error) {
       setAnnotationMessage(error instanceof Error ? error.message : "无法保存标记。 ");
@@ -306,6 +320,8 @@ export default function Home() {
       const opened = remoteToDocument(data.document as RemoteDocument, (data.pages ?? []).map((item: { page_number: number; content: string }) => ({ pageNumber: item.page_number, content: item.content })));
       setRemoteDocuments((items) => items.map((item) => item.id === opened.id ? opened : item));
       setActiveDocument(opened);
+      const restoredIndex = opened.pages.findIndex((item) => item.pageNumber === (opened.lastPage ?? 1));
+      setActivePage(restoredIndex >= 0 ? restoredIndex : 0);
       setUploadKind("success");
       setUploadMessage("资料已打开。阅读区展示原始文件；需要核对解析结果时可打开 Debug。 ");
     } catch (error) {
@@ -356,6 +372,22 @@ export default function Home() {
     }
   }
 
+  if (readingMode && isOriginalPdf) {
+    return <OfficePdfReader
+      documentId={activeDocument.id}
+      title={activeDocument.title}
+      pageCount={Math.max(activeDocument.pages.length, 1)}
+      initialPage={page?.pageNumber ?? 1}
+      marks={annotations}
+      onExit={() => setReadingMode(false)}
+      onPageChange={(pageNumber) => {
+        const index = activeDocument.pages.findIndex((item) => item.pageNumber === pageNumber);
+        if (index >= 0) setActivePage(index);
+      }}
+      onCreateMark={(kind, pageNumber, anchor) => saveAnnotation(kind, anchor, pageNumber)}
+    />;
+  }
+
   return (
     <main className={`lens-shell ${readingMode ? "reading-mode" : ""}`}>
       <aside className="lens-rail">
@@ -372,7 +404,7 @@ export default function Home() {
       <section className="lens-main">
         <header className="lens-topbar">
           <div className="crumb"><FolderOpen size={15} /> 个人资料库 <span>/</span> 正在阅读</div>
-          <div className="topbar-actions"><button type="button" className="reading-mode-toggle" onClick={() => setReadingMode((value) => !value)}>{readingMode ? "退出阅读模式" : "阅读模式"}</button><label className={`import-button ${uploadState !== "idle" ? "busy" : ""}`}><Upload size={15} /> {uploadState === "idle" ? "导入资料" : "正在处理"}<input type="file" accept="application/pdf,text/plain,text/markdown,.pdf,.txt,.md" disabled={uploadState !== "idle"} onChange={handleUpload} /></label></div>
+          <div className="topbar-actions"><button type="button" className="reading-mode-toggle" onClick={() => isOriginalPdf ? setReadingMode(true) : setUploadMessage("请先导入并打开一份 PDF，再进入完整阅读模式。")}>阅读模式</button><label className={`import-button ${uploadState !== "idle" ? "busy" : ""}`}><Upload size={15} /> {uploadState === "idle" ? "导入资料" : "正在处理"}<input type="file" accept="application/pdf,text/plain,text/markdown,.pdf,.txt,.md" disabled={uploadState !== "idle"} onChange={handleUpload} /></label></div>
         </header>
 
         <div className={`import-status ${uploadKind}`} role="status" aria-live="polite">
@@ -399,7 +431,7 @@ export default function Home() {
             <div className="reader-toolbar"><div><span className="doc-kind">{activeDocument.type}</span><span className="doc-source">{activeDocument.source}</span></div><div className="reader-actions"><button type="button" aria-label="更多操作"><MoreHorizontal size={18} /></button>{isOriginalPdf && <button type="button" className={annotationMode ? "debug-active" : ""} onClick={() => { setAnnotationMode((value) => !value); setPendingAnchor(null); }}>{annotationMode ? "退出标记模式" : "标记模式"}</button>}{activeDocument.isRemote && <button type="button" onClick={renameDocument}>重命名</button>}{activeDocument.isRemote && <button type="button" className={showDebug ? "debug-active" : ""} onClick={() => setShowDebug((value) => !value)}>解析 Debug</button>}{activeDocument.isRemote && <a href={`/api/documents/${activeDocument.id}/file`} target="_blank" rel="noreferrer">新窗口打开</a>}{activeDocument.isRemote && <button type="button" className="danger-action" onClick={deleteDocument}>删除资料</button>}<button className={saved ? "saved" : ""} type="button" onClick={() => setSaved((value) => !value)}><Bookmark size={15} fill={saved ? "currentColor" : "none"} /> {saved ? "已保存片段" : "保存片段"}</button></div></div>
             <div className="reader-paper">
               <div className="reader-title"><p>{activeDocument.tag}</p><h1>{activeDocument.title}</h1><div><span>阅读视图</span><i /> <span>第 {page?.pageNumber ?? 1} 页</span><i /> <span>可追溯原文</span></div></div>
-              {isOriginalPdf ? annotationMode ? <><OriginalPdfReader documentId={activeDocument.id} pageNumber={page?.pageNumber ?? 1} zoom={1.25} marks={pageAnnotations.map((item) => ({ id: item.id, kind: item.kind, anchor: item.anchor, status: item.status }))} onSelection={(anchor) => { setPendingAnchor(anchor); setSelectedText(`第 ${page?.pageNumber ?? 1} 页的已选区域`); setAnnotationMessage("已选择区域。选择一个操作以保存。 "); }} />{pendingAnchor && <div className="selection-action-bar"><span>已选中区域</span><button type="button" onClick={() => saveAnnotation("note")}>批注</button><button type="button" onClick={() => saveAnnotation("question")}>询问</button><button type="button" onClick={() => saveAnnotation("doubt")}>存疑</button><button type="button" onClick={() => saveAnnotation("bookmark")}>书签</button><button type="button" className="cancel" onClick={() => setPendingAnchor(null)}>取消</button></div>}</> : <section className="raw-pdf-shell"><iframe key={`${activeDocument.id}-${page?.pageNumber}`} title={`${activeDocument.title} 原始 PDF`} src={`/api/documents/${activeDocument.id}/file#page=${page?.pageNumber ?? 1}`} /><p>快速阅读：由浏览器原生 PDF 阅读器直接展示。需要框选、批注或存疑时，再进入标记模式。</p></section> : <section className="reader-body"><h2>{activeDocument.isRemote ? "原始文本" : "阅读示例"}{uploadState === "extracting" && <LoaderCircle className="inline-loader" size={17} />}</h2>{paragraphs.map((paragraph, index) => <p className={selection === paragraph ? "chosen" : ""} onClick={() => { setSelectedText(paragraph); setQuestion(""); }} key={`${page?.pageNumber}-${index}`}>{selection === paragraph ? <mark>{paragraph}</mark> : paragraph}</p>)}<blockquote><Quote size={18} /> 点击一段文字，即可把右侧回答固定到这一页的原文证据。</blockquote></section>}
+              {isOriginalPdf ? annotationMode ? <><OriginalPdfReader documentId={activeDocument.id} pageNumber={page?.pageNumber ?? 1} zoom={1.25} marks={pageAnnotations.map((item) => ({ id: item.id, kind: item.kind, anchor: item.anchor, status: item.status }))} onSelection={(anchor) => { setPendingAnchor(anchor); setSelectedText(`第 ${page?.pageNumber ?? 1} 页的已选区域`); setAnnotationMessage("已选择区域。选择一个操作以保存。 "); }} />{pendingAnchor && <div className="selection-action-bar"><span>已选中区域</span><button type="button" onClick={() => saveAnnotation("note")}>批注</button><button type="button" onClick={() => saveAnnotation("question")}>询问</button><button type="button" onClick={() => saveAnnotation("doubt")}>存疑</button><button type="button" onClick={() => saveAnnotation("bookmark")}>书签</button><button type="button" className="cancel" onClick={() => setPendingAnchor(null)}>取消</button></div>}</> : <section className="raw-pdf-shell"><div className="quick-reader-tools"><span>快速阅读</span><button type="button" onClick={() => setQuickZoom("page-width")}>适合宽度</button><button type="button" onClick={() => setQuickZoom("page-fit")}>适合整页</button><select value={quickZoom} onChange={(event) => setQuickZoom(event.target.value)} aria-label="PDF 缩放"><option value="75">75%</option><option value="100">100%</option><option value="125">125%</option><option value="150">150%</option><option value="200">200%</option><option value="page-width">适合宽度</option></select></div><iframe key={`${activeDocument.id}-${page?.pageNumber}-${quickZoom}`} title={`${activeDocument.title} 原始 PDF`} src={`/api/documents/${activeDocument.id}/file#page=${page?.pageNumber ?? 1}&zoom=${quickZoom}`} /><p>Ctrl + F 可搜索原文；使用浏览器阅读器的目录、缩略图与缩放控件。</p></section> : <section className="reader-body"><h2>{activeDocument.isRemote ? "原始文本" : "阅读示例"}{uploadState === "extracting" && <LoaderCircle className="inline-loader" size={17} />}</h2>{paragraphs.map((paragraph, index) => <p className={selection === paragraph ? "chosen" : ""} onClick={() => { setSelectedText(paragraph); setQuestion(""); }} key={`${page?.pageNumber}-${index}`}>{selection === paragraph ? <mark>{paragraph}</mark> : paragraph}</p>)}<blockquote><Quote size={18} /> 点击一段文字，即可把右侧回答固定到这一页的原文证据。</blockquote></section>}
               {showDebug && activeDocument.isRemote && <section className="debug-panel"><div><span>后台解析 Debug</span><small>普通模式 · 第 {page?.pageNumber ?? 1} 页 · 已识别文字页 {extractedPages}/{activeDocument.pages.length}</small></div><pre>{page?.content || "此页没有可提取的文字层。原始 PDF 仍保持完整；可在后续使用增强识别。"}</pre></section>}
               <div className="page-nav"><button type="button" disabled={activePage === 0} onClick={() => { setActivePage((value) => value - 1); setSelectedText(""); }}><ChevronLeft size={16} /> 上一页</button><span>{activePage + 1} / {activeDocument.pages.length || 1}</span><button type="button" disabled={activePage >= activeDocument.pages.length - 1} onClick={() => { setActivePage((value) => value + 1); setSelectedText(""); }}>下一页 <ChevronRight size={16} /></button></div>
             </div>

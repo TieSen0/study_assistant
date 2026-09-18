@@ -8,6 +8,7 @@ export const readingDocuments = sqliteTable(
     mimeType: text("mime_type").notNull(),
     objectKey: text("object_key").notNull(),
     pageCount: integer("page_count").notNull(),
+    lastPage: integer("last_page").notNull().default(1),
     createdAt: text("created_at").notNull(),
   },
   (table) => [index("idx_reading_documents_created_at").on(table.createdAt)],
