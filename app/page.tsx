@@ -378,6 +378,7 @@ export default function Home() {
       title={activeDocument.title}
       pageCount={Math.max(activeDocument.pages.length, 1)}
       initialPage={page?.pageNumber ?? 1}
+      pages={activeDocument.pages}
       marks={annotations}
       onExit={() => setReadingMode(false)}
       onPageChange={(pageNumber) => {
@@ -385,6 +386,18 @@ export default function Home() {
         if (index >= 0) setActivePage(index);
       }}
       onCreateMark={(kind, pageNumber, anchor) => saveAnnotation(kind, anchor, pageNumber)}
+      onEditMark={(id) => {
+        const annotation = annotations.find((item) => item.id === id);
+        if (annotation) editAnnotation(annotation);
+      }}
+      onDeleteMark={(id) => {
+        const annotation = annotations.find((item) => item.id === id);
+        if (annotation) deleteAnnotation(annotation);
+      }}
+      onSetDoubtStatus={(id) => {
+        const annotation = annotations.find((item) => item.id === id);
+        if (annotation) setDoubtStatus(annotation);
+      }}
     />;
   }
 

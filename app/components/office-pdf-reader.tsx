@@ -20,13 +20,31 @@ import {
 import type { PdfAnchor, PdfMark } from "./original-pdf-reader";
 
 type ViewMode = "single" | "double" | "continuous";
-type NavigationTab = "pages" | "outline" | "bookmarks";
+type NavigationTab = "pages" | "outline" | "bookmarks" | "annotations";
 type MarkKind = "note" | "question" | "doubt" | "bookmark";
 
 type ReaderMark = PdfMark & { page_number: number; note?: string };
+type ReaderPageText = { pageNumber: number; content: string };
+type OutlineItem = { title: string; dest: any; depth: number };
+type SearchResult = { pageNumber: number; source: "原文" | "书签" | "批注"; excerpt: string };
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
+}
+
+function findExcerpt(content: string, query: string, matchCase: boolean, wholeWord: boolean) {
+  if (!query.trim() || !content) return null;
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const expression = wholeWord ? new RegExp(`(?:^|\\W)(${escaped})(?=\\W|$)`, matchCase ? "" : "i") : new RegExp(escaped, matchCase ? "" : "i");
+  const match = expression.exec(content);
+  if (!match || match.index < 0) return null;
+  const start = Math.max(0, match.index - 52);
+  const end = Math.min(content.length, match.index + match[0].length + 92);
+  return `${start ? "…" : ""}${content.slice(start, end)}${end < content.length ? "…" : ""}`;
+}
+
+function flattenOutline(items: any[], depth = 0): OutlineItem[] {
+  return items.flatMap((item) => [{ title: item.title || "未命名章节", dest: item.dest, depth }, ...flattenOutline(item.items || [], depth + 1)]);
 }
 
 function anchorFromPointer(event: PointerEvent<HTMLDivElement>) {
@@ -132,24 +150,81 @@ function PageCanvas({
   );
 }
 
+function PageThumbnail({ pdf, pageNumber, active, onOpen }: { pdf: any; pageNumber: number; active: boolean; onOpen: () => void }) {
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [ready, setReady] = useState(false);
+  const [shouldRender, setShouldRender] = useState(active || pageNumber <= 4);
+
+  useEffect(() => {
+    const target = buttonRef.current;
+    if (!target || shouldRender || !("IntersectionObserver" in window)) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        setShouldRender(true);
+        observer.disconnect();
+      }
+    }, { root: target.closest(".office-navigation"), rootMargin: "120px" });
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [shouldRender]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!shouldRender) return;
+    async function render() {
+      try {
+        const page = await pdf.getPage(pageNumber);
+        const viewport = page.getViewport({ scale: 0.18 });
+        const canvas = canvasRef.current;
+        if (!canvas || cancelled) return;
+        const ratio = Math.min(window.devicePixelRatio || 1, 1.5);
+        canvas.width = Math.floor(viewport.width * ratio);
+        canvas.height = Math.floor(viewport.height * ratio);
+        canvas.style.width = `${viewport.width}px`;
+        canvas.style.height = `${viewport.height}px`;
+        const context = canvas.getContext("2d");
+        if (!context) return;
+        context.setTransform(ratio, 0, 0, ratio, 0, 0);
+        await page.render({ canvasContext: context, viewport }).promise;
+        if (!cancelled) setReady(true);
+      } catch {
+        // A broken thumbnail must not prevent the user from opening that page.
+      }
+    }
+    render();
+    return () => { cancelled = true; };
+  }, [pageNumber, pdf, shouldRender]);
+
+  return <button ref={buttonRef} type="button" className={active ? "active" : ""} onClick={onOpen}><span className="office-thumb-canvas"><canvas ref={canvasRef} />{!ready && <i>{pageNumber}</i>}</span><small>第 {pageNumber} 页</small></button>;
+}
+
 export function OfficePdfReader({
   documentId,
   title,
   pageCount,
   initialPage,
+  pages,
   marks,
   onExit,
   onPageChange,
   onCreateMark,
+  onEditMark,
+  onDeleteMark,
+  onSetDoubtStatus,
 }: {
   documentId: string;
   title: string;
   pageCount: number;
   initialPage: number;
+  pages: ReaderPageText[];
   marks: ReaderMark[];
   onExit: () => void;
   onPageChange: (pageNumber: number) => void;
   onCreateMark: (kind: MarkKind, pageNumber: number, anchor: PdfAnchor) => void;
+  onEditMark: (id: string) => void;
+  onDeleteMark: (id: string) => void;
+  onSetDoubtStatus: (id: string) => void;
 }) {
   const [pdf, setPdf] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -165,6 +240,8 @@ export function OfficePdfReader({
   const [findText, setFindText] = useState("");
   const [matchCase, setMatchCase] = useState(false);
   const [wholeWord, setWholeWord] = useState(false);
+  const [findScope, setFindScope] = useState<"document" | "all">("document");
+  const [outline, setOutline] = useState<OutlineItem[]>([]);
   const viewportRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -176,7 +253,11 @@ export function OfficePdfReader({
         const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
         pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerSrc;
         const loaded = await pdfjs.getDocument({ url: `/api/documents/${documentId}/file` }).promise;
-        if (!cancelled) setPdf(loaded);
+        if (!cancelled) {
+          setPdf(loaded);
+          const rawOutline = await loaded.getOutline();
+          if (!cancelled) setOutline(flattenOutline(rawOutline || []));
+        }
       } catch (reason) {
         if (!cancelled) setError(reason instanceof Error ? reason.message : "无法加载原始 PDF。");
       } finally {
@@ -201,6 +282,22 @@ export function OfficePdfReader({
     return [currentPage];
   }, [currentPage, pageCount, view]);
 
+  const searchResults = useMemo(() => {
+    const query = findText.trim();
+    if (!query) return [] as SearchResult[];
+    const documentResults = pages.flatMap((item) => {
+      const excerpt = findExcerpt(item.content, query, matchCase, wholeWord);
+      return excerpt ? [{ pageNumber: item.pageNumber, source: "原文" as const, excerpt }] : [];
+    });
+    if (findScope === "document") return documentResults;
+    const markResults = marks.flatMap((mark) => {
+      const excerpt = findExcerpt(mark.note || "", query, matchCase, wholeWord);
+      if (!excerpt) return [];
+      return [{ pageNumber: mark.page_number, source: mark.kind === "bookmark" ? "书签" as const : "批注" as const, excerpt }];
+    });
+    return [...documentResults, ...markResults];
+  }, [findScope, findText, matchCase, marks, pages, wholeWord]);
+
   function changePage(next: number) {
     const page = clamp(next, 1, pageCount);
     setCurrentPage(page);
@@ -211,6 +308,18 @@ export function OfficePdfReader({
   function setFit(kind: "width" | "page") {
     const width = viewportRef.current?.clientWidth ?? 920;
     setZoom(kind === "width" ? clamp((width - 88) / 595, 0.65, 2.1) : clamp((window.innerHeight - 220) / 842, 0.55, 1.55));
+  }
+
+  async function openOutlineItem(item: OutlineItem) {
+    if (!pdf || !item.dest) return;
+    try {
+      const destination = typeof item.dest === "string" ? await pdf.getDestination(item.dest) : item.dest;
+      const reference = destination?.[0];
+      if (!reference) return;
+      changePage((await pdf.getPageIndex(reference)) + 1);
+    } catch {
+      // Some PDFs expose malformed named destinations. Keep the outline visible instead of failing the reader.
+    }
   }
 
   return (
@@ -235,14 +344,15 @@ export function OfficePdfReader({
         </div>
       </nav>
 
-      {findOpen && <section className="office-find-bar"><Search size={16} /><input value={findText} onChange={(event) => setFindText(event.target.value)} placeholder="在原文、书签或批注中查找" autoFocus /><label><input type="checkbox" checked={wholeWord} onChange={(event) => setWholeWord(event.target.checked)} /> 整词</label><label><input type="checkbox" checked={matchCase} onChange={(event) => setMatchCase(event.target.checked)} /> 区分大小写</label><button type="button" onClick={() => alert("全文索引将在后台提取完成后启用；当前不会显示不可靠的搜索结果。")}>查找</button><button type="button" onClick={() => setFindOpen(false)} aria-label="关闭查找"><X size={15} /></button></section>}
+      {findOpen && <section className="office-find-bar"><Search size={16} /><input value={findText} onChange={(event) => setFindText(event.target.value)} placeholder="查找原文、书签或批注" autoFocus /><label><input type="checkbox" checked={wholeWord} onChange={(event) => setWholeWord(event.target.checked)} /> 整词</label><label><input type="checkbox" checked={matchCase} onChange={(event) => setMatchCase(event.target.checked)} /> 区分大小写</label><label>范围<select value={findScope} onChange={(event) => setFindScope(event.target.value as "document" | "all")}><option value="document">仅原文</option><option value="all">原文、书签、批注</option></select></label><span className="office-result-count">{findText.trim() ? `${searchResults.length} 处结果` : "输入关键词"}</span><button type="button" onClick={() => setFindOpen(false)} aria-label="关闭查找"><X size={15} /></button>{findText.trim() && <div className="office-search-results">{searchResults.length ? searchResults.map((result, index) => <button key={`${result.source}-${result.pageNumber}-${index}`} type="button" onClick={() => changePage(result.pageNumber)}><b>{result.source} · 第 {result.pageNumber} 页</b><span>{result.excerpt}</span></button>) : <p>没有找到匹配项。扫描页或尚未提取文字的页面不会出现在结果中。</p>}</div>}</section>}
 
       <div className="office-reader-body">
         {sidebarOpen && <aside className="office-navigation">
-          <div className="office-nav-tabs"><button type="button" className={navigation === "pages" ? "active" : ""} onClick={() => setNavigation("pages")}><FileText size={15} /> 页面</button><button type="button" className={navigation === "outline" ? "active" : ""} onClick={() => setNavigation("outline")}><ListTree size={15} /> 目录</button><button type="button" className={navigation === "bookmarks" ? "active" : ""} onClick={() => setNavigation("bookmarks")}><Bookmark size={15} /> 书签</button></div>
-          {navigation === "pages" && <div className="office-thumbnails">{Array.from({ length: pageCount }, (_, index) => index + 1).map((number) => <button key={number} type="button" className={number === currentPage ? "active" : ""} onClick={() => changePage(number)}><span>{number}</span><small>第 {number} 页</small></button>)}</div>}
-          {navigation === "outline" && <div className="office-side-empty"><ListTree size={21} /><p>这份 PDF 尚未提供可读取目录。</p><small>保留原始目录；不会由系统虚构章节。</small></div>}
+          <div className="office-nav-tabs"><button type="button" className={navigation === "pages" ? "active" : ""} onClick={() => setNavigation("pages")}><FileText size={15} /> 页面</button><button type="button" className={navigation === "outline" ? "active" : ""} onClick={() => setNavigation("outline")}><ListTree size={15} /> 目录</button><button type="button" className={navigation === "bookmarks" ? "active" : ""} onClick={() => setNavigation("bookmarks")}><Bookmark size={15} /> 书签</button><button type="button" className={navigation === "annotations" ? "active" : ""} onClick={() => setNavigation("annotations")}><StickyNote size={15} /> 批注</button></div>
+          {navigation === "pages" && <div className="office-thumbnails">{pdf ? Array.from({ length: pageCount }, (_, index) => index + 1).map((number) => <PageThumbnail key={number} pdf={pdf} pageNumber={number} active={number === currentPage} onOpen={() => changePage(number)} />) : <div className="office-side-empty"><LoaderCircle size={20} className="inline-loader" /><p>正在生成页面缩略图</p></div>}</div>}
+          {navigation === "outline" && (outline.length ? <div className="office-outline">{outline.map((item, index) => <button type="button" key={`${item.title}-${index}`} style={{ paddingLeft: `${12 + item.depth * 15}px` }} onClick={() => openOutlineItem(item)}>{item.title}</button>)}</div> : <div className="office-side-empty"><ListTree size={21} /><p>这份 PDF 尚未提供可读取目录。</p><small>保留原始目录；不会由系统虚构章节。</small></div>)}
           {navigation === "bookmarks" && <div className="office-bookmarks">{marks.filter((mark) => mark.kind === "bookmark").length ? marks.filter((mark) => mark.kind === "bookmark").map((mark) => <button type="button" key={mark.id} onClick={() => changePage(mark.page_number)}><Bookmark size={14} /> 第 {mark.page_number} 页 {mark.note || "书签"}</button>) : <div className="office-side-empty"><Bookmark size={21} /><p>暂无书签</p><small>开启批注工具后框选区域，即可添加书签。</small></div>}</div>}
+          {navigation === "annotations" && <div className="office-annotation-manager">{marks.filter((mark) => mark.kind !== "bookmark").length ? marks.filter((mark) => mark.kind !== "bookmark").map((mark) => <article key={mark.id}><button type="button" className="office-annotation-main" onClick={() => changePage(mark.page_number)}><span className={`office-annotation-dot ${mark.kind}`} /><span><b>{mark.kind === "note" ? "批注" : mark.kind === "question" ? "询问" : "存疑"} · 第 {mark.page_number} 页</b><em>{mark.note || "未添加文字说明"}</em></span></button><div><button type="button" onClick={() => onEditMark(mark.id)}>编辑</button>{mark.kind === "doubt" && <button type="button" onClick={() => onSetDoubtStatus(mark.id)}>{mark.status === "resolved" ? "恢复" : "解决"}</button>}<button type="button" onClick={() => onDeleteMark(mark.id)}>删除</button></div></article>) : <div className="office-side-empty"><StickyNote size={21} /><p>暂无批注</p><small>在“批注工具”中框选原文区域，即可建立可回访的标记。</small></div>}</div>}
         </aside>}
 
         <section className={`office-document-stage ${view}`} ref={viewportRef}>
