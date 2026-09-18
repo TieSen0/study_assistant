@@ -61,16 +61,21 @@ function PageCanvas({
   zoom,
   marks,
   selectable,
+  trackPosition,
   onSelection,
+  onPageVisible,
 }: {
   pdf: any;
   pageNumber: number;
   zoom: number;
   marks: ReaderMark[];
   selectable: boolean;
+  trackPosition: boolean;
   onSelection: (pageNumber: number, anchor: PdfAnchor) => void;
+  onPageVisible: (pageNumber: number) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const pageRef = useRef<HTMLElement>(null);
   const start = useRef<{ x: number; y: number } | null>(null);
   const [draft, setDraft] = useState<PdfAnchor | null>(null);
   const [loading, setLoading] = useState(true);
@@ -110,6 +115,17 @@ function PageCanvas({
     };
   }, [pdf, pageNumber, zoom]);
 
+  useEffect(() => {
+    const target = pageRef.current;
+    if (!target || !trackPosition || !("IntersectionObserver" in window)) return;
+    const observer = new IntersectionObserver((entries) => {
+      const entry = entries[0];
+      if (entry?.isIntersecting && entry.intersectionRatio >= 0.55) onPageVisible(pageNumber);
+    }, { root: target.closest(".office-document-stage"), threshold: [0.55] });
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [onPageVisible, pageNumber, trackPosition]);
+
   function finish(event: PointerEvent<HTMLDivElement>) {
     const origin = start.current;
     start.current = null;
@@ -126,7 +142,7 @@ function PageCanvas({
   }
 
   return (
-    <figure className="office-page" style={{ width: size.width, minHeight: size.height }} data-page={pageNumber}>
+    <figure ref={pageRef} className="office-page" style={{ width: size.width, minHeight: size.height }} data-page={pageNumber}>
       <canvas ref={canvasRef} />
       {selectable && <div
         className="office-selection-layer"
@@ -229,9 +245,10 @@ export function OfficePdfReader({
   const [pdf, setPdf] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [totalPages, setTotalPages] = useState(Math.max(pageCount, 1));
   const [currentPage, setCurrentPage] = useState(clamp(initialPage, 1, Math.max(pageCount, 1)));
   const [zoom, setZoom] = useState(1.15);
-  const [view, setView] = useState<ViewMode>("single");
+  const [view, setView] = useState<ViewMode>("continuous");
   const [navigation, setNavigation] = useState<NavigationTab>("pages");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [marking, setMarking] = useState(false);
@@ -255,6 +272,7 @@ export function OfficePdfReader({
         const loaded = await pdfjs.getDocument({ url: `/api/documents/${documentId}/file` }).promise;
         if (!cancelled) {
           setPdf(loaded);
+          setTotalPages(loaded.numPages || Math.max(pageCount, 1));
           const rawOutline = await loaded.getOutline();
           if (!cancelled) setOutline(flattenOutline(rawOutline || []));
         }
@@ -266,21 +284,21 @@ export function OfficePdfReader({
     }
     load();
     return () => { cancelled = true; };
-  }, [documentId]);
+  }, [documentId, pageCount]);
 
   useEffect(() => {
-    setCurrentPage(clamp(initialPage, 1, Math.max(pageCount, 1)));
-  }, [initialPage, pageCount]);
+    setCurrentPage(clamp(initialPage, 1, Math.max(totalPages, 1)));
+  }, [initialPage, totalPages]);
 
   useEffect(() => {
     onPageChange(currentPage);
   }, [currentPage, onPageChange]);
 
   const visiblePages = useMemo(() => {
-    if (view === "continuous") return Array.from({ length: pageCount }, (_, index) => index + 1);
-    if (view === "double") return [currentPage, currentPage + 1].filter((item) => item <= pageCount);
+    if (view === "continuous") return Array.from({ length: totalPages }, (_, index) => index + 1);
+    if (view === "double") return [currentPage, currentPage + 1].filter((item) => item <= totalPages);
     return [currentPage];
-  }, [currentPage, pageCount, view]);
+  }, [currentPage, totalPages, view]);
 
   const searchResults = useMemo(() => {
     const query = findText.trim();
@@ -299,7 +317,7 @@ export function OfficePdfReader({
   }, [findScope, findText, matchCase, marks, pages, wholeWord]);
 
   function changePage(next: number) {
-    const page = clamp(next, 1, pageCount);
+    const page = clamp(next, 1, totalPages);
     setCurrentPage(page);
     setSelection(null);
     if (view === "continuous") window.setTimeout(() => viewportRef.current?.querySelector(`[data-page="${page}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
@@ -349,7 +367,7 @@ export function OfficePdfReader({
       <div className="office-reader-body">
         {sidebarOpen && <aside className="office-navigation">
           <div className="office-nav-tabs"><button type="button" className={navigation === "pages" ? "active" : ""} onClick={() => setNavigation("pages")}><FileText size={15} /> 页面</button><button type="button" className={navigation === "outline" ? "active" : ""} onClick={() => setNavigation("outline")}><ListTree size={15} /> 目录</button><button type="button" className={navigation === "bookmarks" ? "active" : ""} onClick={() => setNavigation("bookmarks")}><Bookmark size={15} /> 书签</button><button type="button" className={navigation === "annotations" ? "active" : ""} onClick={() => setNavigation("annotations")}><StickyNote size={15} /> 批注</button></div>
-          {navigation === "pages" && <div className="office-thumbnails">{pdf ? Array.from({ length: pageCount }, (_, index) => index + 1).map((number) => <PageThumbnail key={number} pdf={pdf} pageNumber={number} active={number === currentPage} onOpen={() => changePage(number)} />) : <div className="office-side-empty"><LoaderCircle size={20} className="inline-loader" /><p>正在生成页面缩略图</p></div>}</div>}
+          {navigation === "pages" && <div className="office-thumbnails">{pdf ? Array.from({ length: totalPages }, (_, index) => index + 1).map((number) => <PageThumbnail key={number} pdf={pdf} pageNumber={number} active={number === currentPage} onOpen={() => changePage(number)} />) : <div className="office-side-empty"><LoaderCircle size={20} className="inline-loader" /><p>正在生成页面缩略图</p></div>}</div>}
           {navigation === "outline" && (outline.length ? <div className="office-outline">{outline.map((item, index) => <button type="button" key={`${item.title}-${index}`} style={{ paddingLeft: `${12 + item.depth * 15}px` }} onClick={() => openOutlineItem(item)}>{item.title}</button>)}</div> : <div className="office-side-empty"><ListTree size={21} /><p>这份 PDF 尚未提供可读取目录。</p><small>保留原始目录；不会由系统虚构章节。</small></div>)}
           {navigation === "bookmarks" && <div className="office-bookmarks">{marks.filter((mark) => mark.kind === "bookmark").length ? marks.filter((mark) => mark.kind === "bookmark").map((mark) => <button type="button" key={mark.id} onClick={() => changePage(mark.page_number)}><Bookmark size={14} /> 第 {mark.page_number} 页 {mark.note || "书签"}</button>) : <div className="office-side-empty"><Bookmark size={21} /><p>暂无书签</p><small>开启批注工具后框选区域，即可添加书签。</small></div>}</div>}
           {navigation === "annotations" && <div className="office-annotation-manager">{marks.filter((mark) => mark.kind !== "bookmark").length ? marks.filter((mark) => mark.kind !== "bookmark").map((mark) => <article key={mark.id}><button type="button" className="office-annotation-main" onClick={() => changePage(mark.page_number)}><span className={`office-annotation-dot ${mark.kind}`} /><span><b>{mark.kind === "note" ? "批注" : mark.kind === "question" ? "询问" : "存疑"} · 第 {mark.page_number} 页</b><em>{mark.note || "未添加文字说明"}</em></span></button><div><button type="button" onClick={() => onEditMark(mark.id)}>编辑</button>{mark.kind === "doubt" && <button type="button" onClick={() => onSetDoubtStatus(mark.id)}>{mark.status === "resolved" ? "恢复" : "解决"}</button>}<button type="button" onClick={() => onDeleteMark(mark.id)}>删除</button></div></article>) : <div className="office-side-empty"><StickyNote size={21} /><p>暂无批注</p><small>在“批注工具”中框选原文区域，即可建立可回访的标记。</small></div>}</div>}
@@ -358,12 +376,12 @@ export function OfficePdfReader({
         <section className={`office-document-stage ${view}`} ref={viewportRef}>
           {loading && <div className="office-document-state"><LoaderCircle size={22} className="inline-loader" /> 正在打开原始 PDF…</div>}
           {error && <div className="office-document-state error">无法打开论文：{error}</div>}
-          {pdf && <div className="office-pages">{visiblePages.map((number) => <PageCanvas key={`${number}-${zoom}`} pdf={pdf} pageNumber={number} zoom={zoom} marks={marks.filter((mark) => mark.page_number === number)} selectable={marking} onSelection={(pageNumber, anchor) => setSelection({ pageNumber, anchor })} />)}</div>}
+          {pdf && <div className="office-pages">{visiblePages.map((number) => <PageCanvas key={`${number}-${zoom}`} pdf={pdf} pageNumber={number} zoom={zoom} marks={marks.filter((mark) => mark.page_number === number)} selectable={marking} trackPosition={view === "continuous"} onSelection={(pageNumber, anchor) => setSelection({ pageNumber, anchor })} onPageVisible={(pageNumber) => setCurrentPage(pageNumber)} />)}</div>}
           {selection && <div className="office-selection-actions"><span>已选择第 {selection.pageNumber} 页区域</span><button type="button" onClick={() => { onCreateMark("note", selection.pageNumber, selection.anchor); setSelection(null); }}>批注</button><button type="button" onClick={() => { onCreateMark("question", selection.pageNumber, selection.anchor); setSelection(null); }}>询问</button><button type="button" onClick={() => { onCreateMark("doubt", selection.pageNumber, selection.anchor); setSelection(null); }}>存疑</button><button type="button" onClick={() => { onCreateMark("bookmark", selection.pageNumber, selection.anchor); setSelection(null); }}>书签</button><button type="button" onClick={() => setSelection(null)} aria-label="取消选择"><X size={14} /></button></div>}
         </section>
       </div>
 
-      <footer className="office-statusbar"><div><button type="button" disabled={currentPage <= 1} onClick={() => changePage(currentPage - 1)}><ChevronLeft size={16} /> 上一页</button><label>页码 <input type="number" min={1} max={pageCount} value={currentPage} onChange={(event) => changePage(Number(event.target.value))} /></label><span>/ {pageCount}</span><button type="button" disabled={currentPage >= pageCount} onClick={() => changePage(currentPage + 1)}>下一页 <ChevronRight size={16} /></button></div><span>{view === "continuous" ? "连续阅读" : view === "double" ? "双页" : "单页"} · {marking ? "批注工具已开启" : "阅读模式"}</span></footer>
+      <footer className="office-statusbar"><div><button type="button" disabled={currentPage <= 1} onClick={() => changePage(currentPage - 1)}><ChevronLeft size={16} /> 上一页</button><label>页码 <input type="number" min={1} max={totalPages} value={currentPage} onChange={(event) => changePage(Number(event.target.value))} /></label><span>/ {totalPages}</span><button type="button" disabled={currentPage >= totalPages} onClick={() => changePage(currentPage + 1)}>下一页 <ChevronRight size={16} /></button></div><span>{view === "continuous" ? "连续阅读 · 随滚动自动更新页码" : view === "double" ? "双页" : "单页"} · {marking ? "批注工具已开启" : "阅读模式"}</span></footer>
     </main>
   );
 }

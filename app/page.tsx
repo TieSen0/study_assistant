@@ -38,6 +38,7 @@ type ReadingDocument = {
   isRemote?: boolean;
   mimeType?: string;
   lastPage?: number;
+  pageCount?: number;
 };
 
 type RemoteDocument = { id: string; title: string; mime_type: string; page_count: number; last_page?: number; created_at: string };
@@ -126,6 +127,7 @@ function remoteToDocument(item: RemoteDocument, pages: ReadingPage[] = []): Read
     isRemote: true,
     mimeType: item.mime_type,
     lastPage: item.last_page,
+    pageCount: item.page_count,
   };
 }
 
@@ -376,7 +378,7 @@ export default function Home() {
     return <OfficePdfReader
       documentId={activeDocument.id}
       title={activeDocument.title}
-      pageCount={Math.max(activeDocument.pages.length, 1)}
+      pageCount={Math.max(activeDocument.pageCount ?? 0, activeDocument.pages.length, 1)}
       initialPage={page?.pageNumber ?? 1}
       pages={activeDocument.pages}
       marks={annotations}
