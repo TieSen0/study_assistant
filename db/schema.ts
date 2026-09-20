@@ -49,3 +49,19 @@ export const readingAnnotations = sqliteTable(
     index("idx_reading_annotations_document_kind_status").on(table.documentId, table.kind, table.status),
   ],
 );
+
+export const readingAgentMessages = sqliteTable(
+  "reading_agent_messages",
+  {
+    id: text("id").primaryKey(),
+    documentId: text("document_id")
+      .notNull()
+      .references(() => readingDocuments.id, { onDelete: "cascade" }),
+    role: text("role").notNull(),
+    content: text("content").notNull(),
+    contextPage: integer("context_page"),
+    contextKind: text("context_kind").notNull().default("document"),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [index("idx_reading_agent_messages_document_created").on(table.documentId, table.createdAt)],
+);
