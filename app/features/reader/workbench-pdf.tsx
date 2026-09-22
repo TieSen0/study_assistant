@@ -13,6 +13,7 @@ type Target = { page: number; revision: number } | null;
 function OriginalPage({ pdf, number, width, zoom, root, onSelect }: { pdf: PDFDocumentProxy; number: number; width: number; zoom: string; root: RefObject<HTMLDivElement | null>; onSelect: (citation: Citation | null) => void }) {
   const pageRef = useRef<HTMLElement>(null);
   const canvasHost = useRef<HTMLDivElement>(null);
+  const annotationHost = useRef<HTMLDivElement>(null);
   const textHost = useRef<HTMLDivElement>(null);
   const [nearby, setNearby] = useState(false);
   const [size, setSize] = useState({ width: 612, height: 792 });
@@ -30,13 +31,15 @@ function OriginalPage({ pdf, number, width, zoom, root, onSelect }: { pdf: PDFDo
     let cancelled = false;
     let drawing: RenderTask | undefined;
     let textLayer: TextLayer | undefined;
+    let annotationLayer: import("pdfjs-dist/legacy/web/pdf_viewer.mjs").AnnotationLayerBuilder | undefined;
     const host = canvasHost.current;
+    const annotations = annotationHost.current;
     const text = textHost.current;
     setStatus("正在显示原页…");
     async function render() {
       try {
         const page = await pdf.getPage(number);
-        if (cancelled || !host || !text) return;
+        if (cancelled || !host || !annotations || !text) return;
         const normal = page.getViewport({ scale: 1 });
         setSize((old) => old.width === normal.width && old.height === normal.height ? old : { width: normal.width, height: normal.height });
         const viewport = page.getViewport({ scale });
@@ -53,8 +56,23 @@ function OriginalPage({ pdf, number, width, zoom, root, onSelect }: { pdf: PDFDo
         await drawing.promise;
         if (cancelled) return;
         setStatus("");
-        const { TextLayer: Layer } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+        const [{ TextLayer: Layer }, { AnnotationLayerBuilder, SimpleLinkService }] = await Promise.all([
+          import("pdfjs-dist/legacy/build/pdf.mjs"),
+          import("pdfjs-dist/legacy/web/pdf_viewer.mjs"),
+        ]);
         const content = await page.getTextContent();
+        if (cancelled) return;
+        // Page rendering only draws annotation appearance streams. The dedicated
+        // layer is what keeps PDF-native markup (boxes, highlights, ink, notes)
+        // visible when a reader added it without baking it into the page.
+        annotations.replaceChildren();
+        annotationLayer = new AnnotationLayerBuilder({
+          pdfPage: page,
+          linkService: new SimpleLinkService(),
+          renderForms: true,
+          onAppend: (layer: HTMLDivElement) => annotations.appendChild(layer),
+        });
+        await annotationLayer.render({ viewport });
         if (cancelled) return;
         text.replaceChildren();
         textLayer = new Layer({ textContentSource: content, container: text, viewport });
@@ -64,7 +82,7 @@ function OriginalPage({ pdf, number, width, zoom, root, onSelect }: { pdf: PDFDo
       }
     }
     void render();
-    return () => { cancelled = true; drawing?.cancel(); textLayer?.cancel(); host?.replaceChildren(); text?.replaceChildren(); };
+    return () => { cancelled = true; drawing?.cancel(); textLayer?.cancel(); annotationLayer?.cancel(); host?.replaceChildren(); annotations?.replaceChildren(); text?.replaceChildren(); };
   }, [pdf, number, nearby, scale]);
 
   function selected() {
@@ -76,7 +94,7 @@ function OriginalPage({ pdf, number, width, zoom, root, onSelect }: { pdf: PDFDo
   }
 
   return <figure ref={pageRef} className="workbench-original-page" data-page={number} aria-label={`原文第 ${number} 页`} style={{ width: size.width * scale, height: size.height * scale, "--total-scale-factor": scale } as CSSProperties}>
-    {nearby && <><div ref={canvasHost} className="workbench-canvas" /><div ref={textHost} className="textLayer" onMouseUp={selected} onKeyUp={selected} />{status && <div className="workbench-page-status" role="status">{status}</div>}</>}
+    {nearby && <><div ref={canvasHost} className="workbench-canvas" /><div ref={annotationHost} className="workbench-annotations" /><div ref={textHost} className="textLayer" onMouseUp={selected} onKeyUp={selected} />{status && <div className="workbench-page-status" role="status">{status}</div>}</>}
     <figcaption>第 {number} 页</figcaption>
   </figure>;
 }
