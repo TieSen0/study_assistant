@@ -1,54 +1,85 @@
-import { env } from "cloudflare:workers";
+import { agentDatabase } from "@/lib/agent-storage";
+import { contextKind, validateQuestion, type AgentMessage } from "@/app/features/agent/model";
 
-type AgentMessageInput = {
-  content?: unknown;
-  contextPage?: unknown;
-  contextKind?: unknown;
-};
+type RouteContext = { params: Promise<{ id: string }> };
+const columns = "id, document_id, role, content, context_page, context_kind, source_quote, created_at";
+const noCache = { "Cache-Control": "no-store" };
 
-export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
-  try {
-    if (!env.DB) throw new Error("Agent 资料库暂不可用，请稍后重试。");
-    const { id: documentId } = await context.params;
-    const messages = await env.DB
-      .prepare("SELECT id, document_id, role, content, context_page, context_kind, created_at FROM reading_agent_messages WHERE document_id = ? ORDER BY created_at ASC")
-      .bind(documentId)
-      .all();
-    return Response.json({ messages: messages.results });
-  } catch (error) {
-    return Response.json({ error: error instanceof Error ? error.message : "无法读取 Agent 线程。" }, { status: 500 });
-  }
+class RequestError extends Error {
+  constructor(message: string, public status: number) { super(message); }
 }
 
-export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
+async function documentRecord(id: string) {
+  const record = await agentDatabase().prepare("SELECT id, page_count FROM reading_documents WHERE id = ?")
+    .bind(id).first<{ id: string; page_count: number }>();
+  if (!record) throw new RequestError("找不到这份资料。", 404);
+  return record;
+}
+
+async function readBody(request: Request) {
+  let body: unknown;
+  try { body = await request.json(); } catch { throw new RequestError("请求内容不是有效 JSON。", 400); }
+  if (!body || typeof body !== "object" || Array.isArray(body)) throw new RequestError("请求内容无效。", 400);
+  return body as Record<string, unknown>;
+}
+
+function messageId(body: Record<string, unknown>) {
+  if (typeof body.id !== "string" || !/^[\w-]{1,100}$/.test(body.id)) throw new RequestError("问题编号无效。", 400);
+  return body.id;
+}
+
+function failure(error: unknown) {
+  if (error instanceof RequestError) return Response.json({ error: error.message }, { status: error.status, headers: noCache });
+  console.error("Agent storage request failed", error);
+  return Response.json({ error: "问题资料库暂不可用，请稍后重试。输入内容仍会保留。" }, { status: 500, headers: noCache });
+}
+
+export async function GET(_request: Request, context: RouteContext) {
   try {
-    if (!env.DB) throw new Error("Agent 资料库暂不可用，请稍后重试。");
+    const { id } = await context.params;
+    await documentRecord(id);
+    const messages = await agentDatabase().prepare(`SELECT ${columns} FROM reading_agent_messages WHERE document_id = ? ORDER BY created_at ASC, id ASC`).bind(id).all();
+    return Response.json({ messages: messages.results }, { headers: noCache });
+  } catch (error) { return failure(error); }
+}
+
+async function write(request: Request, context: RouteContext, editing: boolean) {
+  try {
     const { id: documentId } = await context.params;
-    const body = await request.json() as AgentMessageInput;
-    const content = typeof body.content === "string" ? body.content.trim().slice(0, 8_000) : "";
-    const contextPage = body.contextPage === undefined || body.contextPage === null ? null : Number(body.contextPage);
-    const contextKind = body.contextKind === "selection" ? "selection" : "document";
-    if (!content) return Response.json({ error: "请输入要保存的问题。" }, { status: 400 });
-    if (contextPage !== null && (!Number.isInteger(contextPage) || contextPage < 1)) {
-      return Response.json({ error: "页面上下文无效。" }, { status: 400 });
+    const document = await documentRecord(documentId);
+    const body = await readBody(request);
+    let input;
+    try { input = validateQuestion(body, document.page_count); }
+    catch (error) { throw new RequestError((error as Error).message, 400); }
+    const db = agentDatabase();
+    // Client-generated ids make uncertain saves safe to retry. Accept old clients too.
+    const id = !editing && body.id === undefined ? crypto.randomUUID() : messageId(body);
+    if (editing) {
+      const result = await db.prepare("UPDATE reading_agent_messages SET content = ?, context_page = ?, context_kind = ?, source_quote = ? WHERE id = ? AND document_id = ? AND role = 'user'")
+        .bind(input.content, input.contextPage, contextKind(input), input.sourceQuote, id, documentId).run();
+      if (!result.meta.changes) throw new RequestError("找不到可编辑的问题。", 404);
+    } else {
+      await db.prepare("INSERT INTO reading_agent_messages (id, document_id, role, content, context_page, context_kind, source_quote, created_at) VALUES (?, ?, 'user', ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING")
+        .bind(id, documentId, input.content, input.contextPage, contextKind(input), input.sourceQuote, new Date().toISOString()).run();
     }
-    const exists = await env.DB.prepare("SELECT id FROM reading_documents WHERE id = ?").bind(documentId).first();
-    if (!exists) return Response.json({ error: "找不到这份资料。" }, { status: 404 });
-    const message = {
-      id: crypto.randomUUID(),
-      document_id: documentId,
-      role: "user",
-      content,
-      context_page: contextPage,
-      context_kind: contextKind,
-      created_at: new Date().toISOString(),
-    };
-    await env.DB
-      .prepare("INSERT INTO reading_agent_messages (id, document_id, role, content, context_page, context_kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-      .bind(message.id, message.document_id, message.role, message.content, message.context_page, message.context_kind, message.created_at)
-      .run();
-    return Response.json({ message }, { status: 201 });
-  } catch (error) {
-    return Response.json({ error: error instanceof Error ? error.message : "无法保存 Agent 问题。" }, { status: 500 });
-  }
+    const message = await db.prepare(`SELECT ${columns} FROM reading_agent_messages WHERE id = ? AND document_id = ?`).bind(id, documentId).first<AgentMessage>();
+    if (!message || message.content !== input.content || message.context_page !== input.contextPage || message.source_quote !== input.sourceQuote) {
+      throw new RequestError("这个问题编号已用于另一条内容。请重新打开编辑后保存。", 409);
+    }
+    return Response.json({ message }, { status: editing ? 200 : 201, headers: noCache });
+  } catch (error) { return failure(error); }
+}
+
+export function POST(request: Request, context: RouteContext) { return write(request, context, false); }
+export function PATCH(request: Request, context: RouteContext) { return write(request, context, true); }
+
+export async function DELETE(request: Request, context: RouteContext) {
+  try {
+    const { id } = await context.params;
+    await documentRecord(id);
+    const body = await readBody(request);
+    await agentDatabase().prepare("DELETE FROM reading_agent_messages WHERE id = ? AND document_id = ? AND role = 'user'")
+      .bind(messageId(body), id).run();
+    return Response.json({ ok: true }, { headers: noCache });
+  } catch (error) { return failure(error); }
 }

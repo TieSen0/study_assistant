@@ -1,0 +1,14 @@
+.workbench-pdf { display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; }
+.workbench-pdf-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 6px 10px; border-bottom: 1px solid #414141; background: #282828; color: #ccc; font-size: 13px; }
+.workbench-pdf-toolbar form, .workbench-pdf-toolbar label { display: flex; align-items: center; gap: 6px; }
+.workbench-pdf-toolbar input { width: 52px; }
+.workbench-pdf-toolbar input, .workbench-pdf-toolbar select, .workbench-pdf-toolbar button { padding: 4px 6px; border: 1px solid #535353; border-radius: 3px; background: #303030; color: #eee; font: inherit; }
+.workbench-pdf-toolbar button { cursor: pointer; }
+.workbench-pdf-toolbar .workbench-quote { border-color: #318ecc; background: #0e639c; }
+.workbench-pdf-scroll { position: relative; overflow: auto; min-height: 0; background: #414447; padding: 16px 0; }
+.workbench-original-page { position: relative; margin: 0 auto 28px; background: white; color: #222; box-shadow: 0 2px 8px #0005; flex-shrink: 0; }
+.workbench-original-page figcaption { position: absolute; bottom: -23px; width: 100%; text-align: center; font-size: 12px; color: #ccc; }
+.workbench-original-page .workbench-canvas { position: absolute; inset: 0; }
+.workbench-original-page canvas { display: block; }
+.workbench-page-status { position: absolute; inset: 0; display: grid; place-items: center; padding: 15px; background: #fff; font-size: 13px; }
+.workbench-opening, .workbench-pdf-error { color: #eee; font-size: 14px; padding: 20px; }

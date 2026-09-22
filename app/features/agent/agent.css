@@ -1,0 +1,40 @@
+.vscode-shell { height: 100dvh; min-height: 0; }
+.vscode-workbench { grid-template-rows: minmax(0, 1fr); }
+.vscode-editor-area { min-height: 0; }
+.vscode-editor-area:has(.vscode-bottom-panel) { grid-template-rows: 35px minmax(0, 1fr) 145px; }
+.vscode-workbench:has(.vscode-reopen-secondary) { grid-template-columns: 48px 250px minmax(0, 1fr) 43px; }
+.vscode-secondary { min-height: 0; overflow: hidden; }
+.vscode-agent-context { flex-shrink: 0; }
+.vscode-agent-context b { font-size: 14px; }
+.vscode-agent-context small, .vscode-agent-compose small { font-size: 12px; }
+.vscode-agent-compose { max-height: 55%; overflow-y: auto; flex-shrink: 0; }
+.vscode-agent-compose textarea { font-size: 14px; line-height: 1.5; }
+.vscode-agent-thread > p { font-size: 14px; }
+.agent-compose-title { display: flex; align-items: center; justify-content: space-between; font-size: 14px; }
+.agent-page-field { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #bcbcbc; }
+.agent-page-field input { width: 64px; border: 1px solid #454545; border-radius: 3px; background: #242424; color: #eee; padding: 4px; }
+.agent-excerpt summary { cursor: pointer; color: #bbb; font-size: 13px; padding: 4px 0; }
+.agent-excerpt textarea { margin-top: 5px; }
+.vscode-agent-thread .agent-question { padding: 11px; border: 1px solid #363e46; background: #20252b; }
+.agent-question-source { display: flex; align-items: center; gap: 5px; margin-bottom: 9px; font-size: 12px; color: #b2c8de; }
+.agent-question-source span:last-child { margin-left: auto; white-space: nowrap; color: #9aaba0; }
+.vscode-agent-thread .agent-question > p { font-size: 14px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-question blockquote { border-left: 2px solid #628ab1; margin: 0 0 10px; padding: 4px 0 4px 9px; color: #aebdca; font-size: 13px; line-height: 1.6; max-height: 150px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-question-actions { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 5px; }
+.agent-question button, .agent-error button { display: inline-flex; align-items: center; gap: 4px; padding: 3px; border: 0; border-radius: 3px; background: transparent; color: #9bcaff; font-size: 12px; cursor: pointer; }
+.agent-question button:hover { background: #354453; }
+.agent-question button:disabled { opacity: .5; cursor: wait; }
+.agent-delete-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-top: 8px; padding: 8px; background: #3a2525; font-size: 12px; }
+.agent-debug { margin-top: 10px; border-top: 1px solid #394048; padding-top: 8px; color: #a6b2bd; }
+.agent-debug summary { cursor: pointer; font-size: 12px; }
+.vscode-agent-thread .agent-debug p { margin: 8px 0; font-size: 12px; color: #a7b6c5; }
+.agent-debug pre { max-height: 220px; overflow: auto; background: #191c20; padding: 8px; font: 12px/1.5 Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.agent-error { color: #ffb6a7; font-size: 13px; line-height: 1.5; margin: 4px 0; }
+.vscode-sidebar.mobile-open { display: block; }
+@media (max-width: 780px) { .vscode-sidebar.mobile-open { position: absolute; z-index: 15; top: 0; bottom: 0; left: 48px; width: min(250px, calc(100vw - 48px)); background: #181818; box-shadow: 8px 0 20px #0008; } }
+.agent-notes > button { display: grid; gap: 6px; border-bottom: 1px solid #333; padding: 12px 8px; overflow-wrap: anywhere; }
+.agent-notes b { font-size: 12px; font-weight: 500; color: #a9c9ec; }
+.agent-notes span { font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
+.vscode-shell button:focus-visible, .vscode-shell summary:focus-visible, .vscode-shell textarea:focus-visible, .vscode-shell input:focus-visible { outline: 1px solid #75b7ff; outline-offset: 2px; }
+@media (max-width: 1050px) { .vscode-workbench { grid-template-columns: 48px 190px minmax(0, 1fr) 290px; } .vscode-workbench:has(.vscode-reopen-secondary) { grid-template-columns: 48px 190px minmax(0, 1fr) 43px; } }
+@media (max-width: 780px) { .vscode-workbench { grid-template-columns: 48px minmax(0, 1fr); position: relative; } .vscode-sidebar { display: none; } .vscode-secondary { display: flex; position: absolute; right: 0; top: 0; bottom: 0; width: min(340px, calc(100vw - 48px)); z-index: 10; box-shadow: -8px 0 24px #0006; } .vscode-workbench:has(.vscode-reopen-secondary) { grid-template-columns: 48px minmax(0, 1fr) 43px; } }

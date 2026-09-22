@@ -61,6 +61,7 @@ export const readingAgentMessages = sqliteTable(
     content: text("content").notNull(),
     contextPage: integer("context_page"),
     contextKind: text("context_kind").notNull().default("document"),
+    sourceQuote: text("source_quote").notNull().default(""),
     createdAt: text("created_at").notNull(),
   },
   (table) => [index("idx_reading_agent_messages_document_created").on(table.documentId, table.createdAt)],

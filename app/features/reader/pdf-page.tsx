@@ -2,6 +2,7 @@
 
 import { PointerEvent, useEffect, useRef, useState } from "react";
 import { LoaderCircle } from "lucide-react";
+import type { RenderTask } from "pdfjs-dist";
 import type { PdfAnchor } from "../../components/original-pdf-reader";
 import type { ReaderMark } from "./model";
 import { clamp } from "./model";
@@ -30,7 +31,7 @@ export function PdfPage({ pdf, pageNumber, zoom, marks, marking, followScroll, o
 
   useEffect(() => {
     let cancelled = false;
-    let task: { cancel: () => void } | undefined;
+    let task: RenderTask | undefined;
     async function render() {
       setLoading(true);
       try {
@@ -47,8 +48,9 @@ export function PdfPage({ pdf, pageNumber, zoom, marks, marking, followScroll, o
         const context = canvas.getContext("2d");
         if (!context) throw new Error("无法创建页面画布");
         context.setTransform(ratio, 0, 0, ratio, 0, 0);
-        task = sourcePage.render({ canvasContext: context, viewport });
-        await task.promise;
+        const rendering = sourcePage.render({ canvas, canvasContext: context, viewport }) as RenderTask;
+        task = rendering;
+        await rendering.promise;
       } catch (error) {
         if (!(error instanceof Error && error.name === "RenderingCancelledException")) console.error(error);
       } finally {
@@ -122,7 +124,7 @@ export function PdfThumbnail({ pdf, pageNumber, active, onOpen }: { pdf: any; pa
         const context = canvas.getContext("2d");
         if (!context) return;
         context.setTransform(ratio, 0, 0, ratio, 0, 0);
-        await sourcePage.render({ canvasContext: context, viewport }).promise;
+        await sourcePage.render({ canvas, canvasContext: context, viewport }).promise;
         if (!cancelled) setReady(true);
       } catch { /* A thumbnail cannot block the reader. */ }
     }

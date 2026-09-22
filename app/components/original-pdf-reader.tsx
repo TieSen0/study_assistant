@@ -3,6 +3,7 @@
 import { PointerEvent, useEffect, useRef, useState } from "react";
 import pdfWorkerSrc from "pdfjs-dist/legacy/build/pdf.worker.mjs?url";
 import { LoaderCircle } from "lucide-react";
+import type { RenderTask } from "pdfjs-dist";
 
 export type PdfAnchor = { x: number; y: number; width: number; height: number };
 export type PdfMark = { id: string; kind: string; anchor: PdfAnchor; status: string };
@@ -43,7 +44,7 @@ export function OriginalPdfReader({
 
   useEffect(() => {
     let cancelled = false;
-    let renderTask: { cancel: () => void } | undefined;
+    let renderTask: RenderTask | undefined;
     async function render() {
       setLoading(true);
       setError("");
@@ -64,7 +65,7 @@ export function OriginalPdfReader({
         const context = canvas.getContext("2d");
         if (!context) throw new Error("无法创建页面画布。");
         context.setTransform(ratio, 0, 0, ratio, 0, 0);
-        renderTask = pdfPage.render({ canvasContext: context, viewport });
+        renderTask = pdfPage.render({ canvas, canvasContext: context, viewport });
         await renderTask.promise;
         if (!cancelled) setLoading(false);
       } catch (reason) {

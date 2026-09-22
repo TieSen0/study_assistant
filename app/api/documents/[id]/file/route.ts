@@ -20,16 +20,18 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     const requestedRange = parseRange(request.headers.get("Range"));
     const file = await env.BUCKET.get(document.object_key, requestedRange ? { range: requestedRange.end === undefined ? { offset: requestedRange.start } : { offset: requestedRange.start, length: requestedRange.end - requestedRange.start + 1 } } : undefined);
     if (!file) return Response.json({ error: "原始文件不存在。" }, { status: 404 });
-    const range = file.range;
     const total = file.size;
+    const partial = requestedRange !== null && file.range !== undefined;
+    const offset = partial && file.range && "offset" in file.range ? file.range.offset ?? 0 : 0;
+    const length = partial && file.range && "length" in file.range ? file.range.length ?? total - offset : total;
     return new Response(file.body, {
-      status: range ? 206 : 200,
+      status: partial ? 206 : 200,
       headers: {
         "Content-Type": document.mime_type,
         "Content-Disposition": `inline; filename*=UTF-8''${encodeURIComponent(document.title)}`,
         "Accept-Ranges": "bytes",
-        "Content-Length": String(range?.length ?? total),
-        ...(range ? { "Content-Range": `bytes ${range.offset}-${range.offset + range.length - 1}/${total}` } : {}),
+        "Content-Length": String(length),
+        ...(partial ? { "Content-Range": `bytes ${offset}-${offset + length - 1}/${total}` } : {}),
       },
     });
   } catch (error) {

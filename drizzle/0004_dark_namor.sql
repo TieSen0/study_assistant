@@ -1,0 +1,1 @@
+ALTER TABLE `reading_agent_messages` ADD `source_quote` text DEFAULT '' NOT NULL;
