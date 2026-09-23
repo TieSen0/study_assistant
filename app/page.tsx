@@ -1,69 +1,41 @@
 "use client";
 
 import "./codex-shell.css";
-import { Bell, Bot, ChevronDown, ChevronRight, Command, FilePlus2, FileText, Files, Folder, FolderOpen, GitBranch, LibraryBig, MessageSquareText, MoreHorizontal, Search, Settings2, TerminalSquare, X } from "lucide-react";
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { Bell, Bot, Command, FilePlus2, Files, GitBranch, LibraryBig, MessageSquareText, MoreHorizontal, Search, Settings2, TerminalSquare } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import type { ReadingDocument } from "./domain/reading";
 import { AgentSidebar, NotesSidebar } from "./features/agent/agent-sidebar";
 import { useDocumentThread } from "./features/agent/use-document-thread";
-import { WorkbenchPdf } from "./features/reader/workbench-pdf";
-import pdfWorkerSrc from "pdfjs-dist/legacy/build/pdf.worker.mjs?url";
-
-type Activity = "explorer" | "search" | "notes" | "extensions";
-type PanelTab = "PROBLEMS" | "OUTPUT" | "TERMINAL";
-type ReadingPage = { pageNumber: number; content: string };
-type StoredDocument = { id: string; title: string; mime_type: string; page_count: number; last_page?: number; created_at: string; pages?: ReadingPage[] };
-
-async function extractPages(file: File): Promise<ReadingPage[]> {
-  const lowerName = file.name.toLowerCase();
-  if (file.type === "application/pdf" || lowerName.endsWith(".pdf")) {
-    const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-    pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerSrc;
-    const pdf = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
-    const pages: ReadingPage[] = [];
-    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-      const page = await pdf.getPage(pageNumber);
-      const text = await page.getTextContent();
-      pages.push({ pageNumber, content: text.items.map((item) => ("str" in item ? item.str : "")).join(" ").replace(/\s+/g, " ").trim() });
-    }
-    return pages;
-  }
-  if (file.type.startsWith("text/") || /\.(txt|md)$/i.test(file.name)) return [{ pageNumber: 1, content: await file.text() }];
-  throw new Error("当前支持 PDF、TXT 或 Markdown 文件。");
-}
+import { extractReadablePages, importDocument } from "./features/library/document-import";
+import { ExplorerSidebar, ExtensionsSidebar, LibrarySearch } from "./features/library/library-sidebar";
+import { BottomPanel, CommandPalette, EditorGroup } from "./features/workbench/editor-group";
+import type { SourceTarget, WorkbenchActivity, WorkbenchPanelTab } from "./features/workbench/model";
 
 export default function Home() {
-  const [activity, setActivity] = useState<Activity>("explorer");
+  const [activity, setActivity] = useState<WorkbenchActivity>("explorer");
   const [navigationOpen, setNavigationOpen] = useState(false);
-  const [documents, setDocuments] = useState<StoredDocument[]>([]);
-  const [openEditors, setOpenEditors] = useState<StoredDocument[]>([]);
+  const [documents, setDocuments] = useState<ReadingDocument[]>([]);
+  const [openEditors, setOpenEditors] = useState<ReadingDocument[]>([]);
   const [activeDocumentId, setActiveDocumentId] = useState<string | null>(null);
   const [libraryState, setLibraryState] = useState<"loading" | "ready" | "error">("loading");
   const [message, setMessage] = useState("");
   const [uploading, setUploading] = useState(false);
   const [agentOpen, setAgentOpen] = useState(true);
   const [panelOpen, setPanelOpen] = useState(true);
-  const [panelTab, setPanelTab] = useState<PanelTab>("OUTPUT");
+  const [panelTab, setPanelTab] = useState<WorkbenchPanelTab>("OUTPUT");
   const [fileMenuOpen, setFileMenuOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [sourceTarget, setSourceTarget] = useState<SourceTarget | null>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
   const activeDocument = openEditors.find((document) => document.id === activeDocumentId) ?? null;
   const thread = useDocumentThread(activeDocument);
-  const [sourceTarget, setSourceTarget] = useState<{ documentId: string; page: number; revision: number } | null>(null);
-  function jumpToSource(page: number) {
-    if (!activeDocument || page < 1 || page > activeDocument.page_count) return;
-    setSourceTarget((previous) => ({ documentId: activeDocument.id, page, revision: (previous?.revision ?? 0) + 1 }));
-  }
-  function quoteSource(citation: { page: number; text: string }) {
-    if (thread.busy) { setMessage("问题正在保存，请稍后添加引用。"); return; }
-    thread.setDraft({ page: String(citation.page), quote: citation.text });
-    setAgentOpen(true);
-  }
   const filteredDocuments = useMemo(() => documents.filter((document) => document.title.toLowerCase().includes(query.trim().toLowerCase())), [documents, query]);
 
   useEffect(() => {
     fetch("/api/documents")
-      .then((response) => response.ok ? response.json() as Promise<{ documents?: StoredDocument[] }> : Promise.reject())
+      .then((response) => response.ok ? response.json() as Promise<{ documents?: ReadingDocument[] }> : Promise.reject())
       .then((data) => { setDocuments(data.documents ?? []); setLibraryState("ready"); })
       .catch(() => { setLibraryState("error"); setMessage("资料库暂时不可用。请稍后重试。"); });
   }, []);
@@ -77,16 +49,16 @@ export default function Home() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  async function openDocument(document: StoredDocument) {
+  async function openDocument(document: ReadingDocument) {
     setMessage("");
     let opened = document;
     if (!document.pages) {
       try {
         setMessage(`正在打开「${document.title}」…`);
         const response = await fetch(`/api/documents/${document.id}`);
-        const data = await response.json() as { error?: string; document: StoredDocument; pages?: { page_number: number; content: string }[] };
+        const data = await response.json() as { error?: string; document: ReadingDocument; pages?: { page_number: number; content: string }[] };
         if (!response.ok) throw new Error(data.error ?? "无法打开资料。");
-        opened = { ...data.document, pages: (data.pages ?? []).map((page: { page_number: number; content: string }) => ({ pageNumber: page.page_number, content: page.content })) } as StoredDocument;
+        opened = { ...data.document, pages: (data.pages ?? []).map((page) => ({ pageNumber: page.page_number, content: page.content })) };
         setDocuments((items) => items.map((item) => item.id === opened.id ? opened : item));
       } catch (error) {
         setMessage(error instanceof Error ? error.message : "无法打开资料。");
@@ -106,6 +78,17 @@ export default function Home() {
     if (activeDocumentId === id) setActiveDocumentId(remaining[Math.max(0, index - 1)]?.id ?? null);
   }
 
+  function jumpToSource(page: number) {
+    if (!activeDocument || page < 1 || page > activeDocument.page_count) return;
+    setSourceTarget((previous) => ({ documentId: activeDocument.id, page, revision: (previous?.revision ?? 0) + 1 }));
+  }
+
+  function quoteSource(citation: { page: number; text: string }) {
+    if (thread.busy) { setMessage("问题正在保存，请稍后添加引用。"); return; }
+    thread.setDraft({ page: String(citation.page), quote: citation.text });
+    setAgentOpen(true);
+  }
+
   async function handleUpload(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -114,14 +97,9 @@ export default function Home() {
     try {
       setUploading(true);
       setMessage(`正在解析「${file.name}」…`);
-      const pages = await extractPages(file);
-      const form = new FormData();
-      form.append("file", file);
-      form.append("pages", JSON.stringify(pages));
-      const response = await fetch("/api/documents", { method: "POST", body: form });
-      const data = await response.json() as { error?: string; document: StoredDocument };
-      if (!response.ok) throw new Error(data.error ?? "导入失败。");
-      const document = { ...data.document, pages } as StoredDocument;
+      const pages = await extractReadablePages(file);
+      const imported = await importDocument(file, pages) as ReadingDocument;
+      const document = { ...imported, pages };
       setDocuments((items) => [document, ...items]);
       await openDocument(document);
       setMessage(`已导入「${document.title}」。`);
@@ -132,13 +110,28 @@ export default function Home() {
     }
   }
 
+  function selectActivity(next: WorkbenchActivity) {
+    setActivity(next);
+    setNavigationOpen((open) => activity !== next || !open);
+  }
+
   return <main className="vscode-shell">
     <input ref={uploadRef} className="hidden-upload" type="file" accept="application/pdf,text/plain,text/markdown,.pdf,.txt,.md" onChange={handleUpload} />
-    <header className="vscode-menubar"><div className="vscode-brand"><span>Lens</span><small>个人论文工作台</small></div><nav aria-label="应用菜单"><button type="button" onClick={() => setFileMenuOpen((open) => !open)}>文件</button><button type="button">编辑</button><button type="button">选择</button><button type="button">视图</button><button type="button">转到</button><button type="button">运行</button><button type="button">终端</button><button type="button">帮助</button></nav><button type="button" className="vscode-command-center" onClick={() => setCommandOpen(true)}><Command size={14} /> 搜索 <kbd>Ctrl K</kbd></button><div className="vscode-window-actions"><button type="button" aria-label="通知"><Bell size={15} /></button><button type="button" aria-label="更多"><MoreHorizontal size={16} /></button></div>{fileMenuOpen && <div className="vscode-file-menu"><button type="button" onClick={() => { uploadRef.current?.click(); setFileMenuOpen(false); }}><FilePlus2 size={15} /> 导入资料…</button><button type="button" onClick={() => { setActivity("explorer"); setFileMenuOpen(false); }}>打开资源管理器</button></div>}</header>
+    <header className="vscode-menubar">
+      <div className="vscode-brand"><span>Lens</span><small>证据驱动的阅读工作台</small></div>
+      <nav aria-label="应用菜单"><button type="button" onClick={() => setFileMenuOpen((open) => !open)}>文件</button><button type="button">编辑</button><button type="button">选择</button><button type="button">视图</button><button type="button">转到</button><button type="button">运行</button><button type="button">终端</button><button type="button">帮助</button></nav>
+      <button type="button" className="vscode-command-center" onClick={() => setCommandOpen(true)}><Command size={14} /> 搜索 <kbd>Ctrl K</kbd></button>
+      <div className="vscode-window-actions"><button type="button" aria-label="通知"><Bell size={15} /></button><button type="button" aria-label="更多"><MoreHorizontal size={16} /></button></div>
+      {fileMenuOpen && <div className="vscode-file-menu"><button type="button" onClick={() => { uploadRef.current?.click(); setFileMenuOpen(false); }}><FilePlus2 size={15} /> 导入资料…</button><button type="button" onClick={() => { setActivity("explorer"); setFileMenuOpen(false); }}>打开资源管理器</button></div>}
+    </header>
     <section className="vscode-workbench">
-      <nav className="vscode-activitybar" aria-label="主侧栏"><div><ActivityButton active={activity === "explorer"} icon={Files} label="资源管理器" onClick={() => { setActivity("explorer"); setNavigationOpen((open) => activity !== "explorer" || !open); }} /><ActivityButton active={activity === "search"} icon={Search} label="搜索" onClick={() => { setActivity("search"); setNavigationOpen((open) => activity !== "search" || !open); }} /><ActivityButton active={activity === "notes"} icon={MessageSquareText} label="笔记" onClick={() => { setActivity("notes"); setNavigationOpen((open) => activity !== "notes" || !open); }} /><ActivityButton active={activity === "extensions"} icon={LibraryBig} label="扩展" onClick={() => { setActivity("extensions"); setNavigationOpen((open) => activity !== "extensions" || !open); }} /></div><div><ActivityButton icon={Settings2} label="管理" onClick={() => undefined} /></div></nav>
-      <aside className={`vscode-sidebar ${navigationOpen ? "mobile-open" : ""}`}>{activity === "explorer" ? <Explorer documents={documents} openEditors={openEditors} activeId={activeDocumentId} loading={libraryState === "loading"} onImport={() => uploadRef.current?.click()} onOpen={openDocument} onClose={closeEditor} /> : activity === "search" ? <SearchSidebar query={query} onQuery={setQuery} documents={filteredDocuments} onOpen={openDocument} /> : activity === "notes" ? <NotesSidebar thread={thread} document={activeDocument} onJump={jumpToSource} onOpenAgent={() => setAgentOpen(true)} /> : <ExtensionsSidebar />}</aside>
-      <section className="vscode-editor-area" aria-label="编辑器组"><div className="vscode-editor-tabs">{openEditors.map((document) => <button type="button" key={document.id} className={document.id === activeDocumentId ? "active" : ""} onClick={() => setActiveDocumentId(document.id)}><FileText size={15} /><span>{document.title}{document.mime_type === "application/pdf" ? ".pdf" : ""}</span><i onClick={(event) => { event.stopPropagation(); closeEditor(document.id); }}><X size={13} /></i></button>)}</div>{activeDocument ? <DocumentEditor document={activeDocument} target={sourceTarget?.documentId === activeDocument.id ? sourceTarget : null} onQuote={quoteSource} /> : <WelcomeEditor onImport={() => uploadRef.current?.click()} />}{panelOpen && <BottomPanel active={panelTab} onSelect={setPanelTab} onClose={() => setPanelOpen(false)} documents={documents.length} message={message} />}</section>
+      <nav className="vscode-activitybar" aria-label="主侧栏"><div><ActivityButton active={activity === "explorer"} icon={Files} label="资源管理器" onClick={() => selectActivity("explorer")} /><ActivityButton active={activity === "search"} icon={Search} label="搜索" onClick={() => selectActivity("search")} /><ActivityButton active={activity === "notes"} icon={MessageSquareText} label="笔记" onClick={() => selectActivity("notes")} /><ActivityButton active={activity === "extensions"} icon={LibraryBig} label="扩展" onClick={() => selectActivity("extensions")} /></div><div><ActivityButton icon={Settings2} label="管理" onClick={() => undefined} /></div></nav>
+      <aside className={`vscode-sidebar ${navigationOpen ? "mobile-open" : ""}`}>{activity === "explorer" ? <ExplorerSidebar documents={documents} openEditors={openEditors} activeId={activeDocumentId} loading={libraryState === "loading"} onImport={() => uploadRef.current?.click()} onOpen={openDocument} onClose={closeEditor} /> : activity === "search" ? <LibrarySearch query={query} onQuery={setQuery} documents={filteredDocuments} onOpen={openDocument} /> : activity === "notes" ? <NotesSidebar thread={thread} document={activeDocument} onJump={jumpToSource} onOpenAgent={() => setAgentOpen(true)} /> : <ExtensionsSidebar />}</aside>
+      <section className="vscode-editor-area" aria-label="编辑器组">
+        <div className="vscode-editor-tabs">{openEditors.map((document) => <button type="button" key={document.id} className={document.id === activeDocumentId ? "active" : ""} onClick={() => setActiveDocumentId(document.id)}><span>{document.title}{document.mime_type === "application/pdf" ? ".pdf" : ""}</span><i onClick={(event) => { event.stopPropagation(); closeEditor(document.id); }}>×</i></button>)}</div>
+        <EditorGroup document={activeDocument} target={sourceTarget?.documentId === activeDocument?.id ? sourceTarget : null} onQuote={quoteSource} onImport={() => uploadRef.current?.click()} />
+        {panelOpen && <BottomPanel active={panelTab} onSelect={setPanelTab} onClose={() => setPanelOpen(false)} documents={documents.length} message={uploading ? "正在导入资料…" : message} />}
+      </section>
       {agentOpen ? <AgentSidebar document={activeDocument} thread={thread} onJump={jumpToSource} onClose={() => setAgentOpen(false)} /> : <button type="button" className="vscode-reopen-secondary" onClick={() => setAgentOpen(true)}><Bot size={18} /> Agent</button>}
     </section>
     <footer className="vscode-statusbar"><div><span><GitBranch size={12} /> main</span><span>资料库 {libraryState === "ready" ? "已连接" : "连接中"}</span></div><div><button type="button" onClick={() => setPanelOpen((open) => !open)}>{panelOpen ? "收起面板" : "打开面板"}</button><span>{activeDocument ? `${activeDocument.page_count} 页` : "无编辑器"}</span><TerminalSquare size={13} /></div></footer>
@@ -146,14 +139,6 @@ export default function Home() {
   </main>;
 }
 
-function ActivityButton({ active, icon: Icon, label, onClick }: { active?: boolean; icon: typeof Files; label: string; onClick: () => void }) { return <button type="button" className={active ? "active" : ""} title={label} aria-label={label} onClick={onClick}><Icon size={21} /></button>; }
-function Explorer({ documents, openEditors, activeId, loading, onImport, onOpen, onClose }: { documents: StoredDocument[]; openEditors: StoredDocument[]; activeId: string | null; loading: boolean; onImport: () => void; onOpen: (document: StoredDocument) => void; onClose: (id: string) => void }) { return <><header className="vscode-sidebar-title"><strong>EXPLORER</strong><button type="button" title="导入资料" onClick={onImport}><FilePlus2 size={16} /></button><button type="button" title="更多"><MoreHorizontal size={16} /></button></header><section className="vscode-side-section"><h2><ChevronDown size={14} /> OPEN EDITORS</h2>{openEditors.length ? openEditors.map((document) => <button type="button" className={`vscode-file-row ${activeId === document.id ? "selected" : ""}`} key={document.id} onClick={() => onOpen(document)}><FileText size={15} /><span>{document.title}{document.mime_type === "application/pdf" ? ".pdf" : ""}</span><i onClick={(event) => { event.stopPropagation(); onClose(document.id); }}><X size={12} /></i></button>) : <p className="vscode-empty-line">没有已打开的编辑器</p>}</section><section className="vscode-side-section workspace"><h2><ChevronDown size={14} /> LENS</h2><button type="button" className="vscode-tree-root" onClick={onImport}><ChevronDown size={14} /><FolderOpen size={16} /> 资料库</button><div className="vscode-tree-indent"><button type="button" className="vscode-tree-folder"><ChevronRight size={14} /><Folder size={16} /> papers</button><button type="button" className="vscode-tree-folder"><ChevronRight size={14} /><Folder size={16} /> books</button>{loading ? <p className="vscode-empty-line">正在读取资料库…</p> : documents.map((document) => <button type="button" className={`vscode-file-row ${activeId === document.id ? "selected" : ""}`} key={document.id} onClick={() => onOpen(document)}><FileText size={15} /><span>{document.title}{document.mime_type === "application/pdf" ? ".pdf" : ""}</span></button>)}{!loading && !documents.length && <p className="vscode-empty-line">导入第一篇论文开始</p>}</div></section></>; }
-function SearchSidebar({ query, onQuery, documents, onOpen }: { query: string; onQuery: (value: string) => void; documents: StoredDocument[]; onOpen: (document: StoredDocument) => void }) { return <><header className="vscode-sidebar-title"><strong>SEARCH</strong></header><div className="vscode-search-box"><Search size={15} /><input autoFocus value={query} onChange={(event) => onQuery(event.target.value)} placeholder="Search" /></div><section className="vscode-search-results">{query.trim() ? documents.map((document) => <button type="button" key={document.id} onClick={() => onOpen(document)}><FileText size={15} />{document.title}</button>) : <p>输入文件名以搜索资料库。</p>}{query.trim() && !documents.length && <p>没有结果。</p>}</section></>; }
-function ExtensionsSidebar() { return <><header className="vscode-sidebar-title"><strong>EXTENSIONS</strong></header><section className="vscode-search-results"><p>这里以后放论文解析器、OCR、引用管理和模型连接器。</p></section></>; }
-function WelcomeEditor({ onImport }: { onImport: () => void }) { return <div className="vscode-welcome"><span className="vscode-welcome-mark">L</span><h1>Lens</h1><p>以 VSCode 的工作方式处理论文与资料。</p><button type="button" onClick={onImport}><FilePlus2 size={16} /> 导入一份资料</button><small>导入后会作为一个文件出现在资源管理器，并在编辑器标签中打开。</small></div>; }
-function DocumentEditor({ document, target, onQuote }: { document: StoredDocument; target: { page: number; revision: number } | null; onQuote: (citation: { page: number; text: string }) => void }) {
-  if (document.mime_type === "application/pdf") return <div className="vscode-pdf-editor"><header><span><FileText size={15} /> {document.title}.pdf</span><small>原始 PDF · 连续阅读</small></header><WorkbenchPdf key={document.id} documentId={document.id} initialPage={document.last_page ?? 1} target={target} onQuote={onQuote} /></div>;
-  return <article className="vscode-text-editor"><header><FileText size={15} /> {document.title}</header><pre>{document.pages?.[0]?.content || "这份资料没有可读取的文字层。"}</pre></article>;
+function ActivityButton({ active, icon: Icon, label, onClick }: { active?: boolean; icon: LucideIcon; label: string; onClick: () => void }) {
+  return <button type="button" className={active ? "active" : ""} title={label} aria-label={label} onClick={onClick}><Icon size={21} /></button>;
 }
-function BottomPanel({ active, onSelect, onClose, documents, message }: { active: PanelTab; onSelect: (tab: PanelTab) => void; onClose: () => void; documents: number; message: string }) { return <section className="vscode-bottom-panel"><header>{(["PROBLEMS", "OUTPUT", "TERMINAL"] as PanelTab[]).map((tab) => <button type="button" key={tab} className={tab === active ? "active" : ""} onClick={() => onSelect(tab)}>{tab}</button>)}<i /><button type="button" onClick={onClose} aria-label="关闭面板"><X size={15} /></button></header><div>{active === "PROBLEMS" ? <p>0 problems</p> : active === "OUTPUT" ? <p>{message || `资料库中有 ${documents} 份资料。`}</p> : <p>终端尚未接入。这里将用于显示本地解析、OCR 与索引任务。</p>}</div></section>; }
-function CommandPalette({ onClose, onImport, onExplorer }: { onClose: () => void; onImport: () => void; onExplorer: () => void }) { return <div className="vscode-command-layer" onMouseDown={onClose}><section onMouseDown={(event) => event.stopPropagation()}><header><Command size={16} /><input autoFocus placeholder="输入命令" /><kbd>Esc</kbd></header><button type="button" onClick={onImport}><FilePlus2 size={16} /> Lens: 导入资料</button><button type="button" onClick={onExplorer}><Files size={16} /> View: Show Explorer</button></section></div>; }

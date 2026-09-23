@@ -1,0 +1,2 @@
+/* The shell owns three independent rows: tabs, document surface, and panel. */
+.vscode-editor-area { grid-template-rows: 35px minmax(0, 1fr) auto; }

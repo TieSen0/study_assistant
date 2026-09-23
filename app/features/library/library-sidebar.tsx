@@ -1,0 +1,16 @@
+"use client";
+
+import { ChevronDown, ChevronRight, FilePlus2, FileText, Folder, FolderOpen, MoreHorizontal, Search, X } from "lucide-react";
+import type { ReadingDocument } from "../../domain/reading";
+
+export function ExplorerSidebar({ documents, openEditors, activeId, loading, onImport, onOpen, onClose }: { documents: ReadingDocument[]; openEditors: ReadingDocument[]; activeId: string | null; loading: boolean; onImport: () => void; onOpen: (document: ReadingDocument) => void; onClose: (id: string) => void }) {
+  return <><header className="vscode-sidebar-title"><strong>EXPLORER</strong><button type="button" title="导入资料" onClick={onImport}><FilePlus2 size={16} /></button><button type="button" title="更多"><MoreHorizontal size={16} /></button></header><section className="vscode-side-section"><h2><ChevronDown size={14} /> OPEN EDITORS</h2>{openEditors.length ? openEditors.map((document) => <button type="button" className={`vscode-file-row ${activeId === document.id ? "selected" : ""}`} key={document.id} onClick={() => onOpen(document)}><FileText size={15} /><span>{document.title}{document.mime_type === "application/pdf" ? ".pdf" : ""}</span><i onClick={(event) => { event.stopPropagation(); onClose(document.id); }}><X size={12} /></i></button>) : <p className="vscode-empty-line">没有已打开的编辑器</p>}</section><section className="vscode-side-section workspace"><h2><ChevronDown size={14} /> LENS</h2><button type="button" className="vscode-tree-root" onClick={onImport}><ChevronDown size={14} /><FolderOpen size={16} /> 资料库</button><div className="vscode-tree-indent"><button type="button" className="vscode-tree-folder"><ChevronRight size={14} /><Folder size={16} /> papers</button><button type="button" className="vscode-tree-folder"><ChevronRight size={14} /><Folder size={16} /> books</button>{loading ? <p className="vscode-empty-line">正在读取资料库…</p> : documents.map((document) => <button type="button" className={`vscode-file-row ${activeId === document.id ? "selected" : ""}`} key={document.id} onClick={() => onOpen(document)}><FileText size={15} /><span>{document.title}{document.mime_type === "application/pdf" ? ".pdf" : ""}</span></button>)}{!loading && !documents.length && <p className="vscode-empty-line">导入第一篇论文开始</p>}</div></section></>;
+}
+
+export function LibrarySearch({ query, onQuery, documents, onOpen }: { query: string; onQuery: (value: string) => void; documents: ReadingDocument[]; onOpen: (document: ReadingDocument) => void }) {
+  return <><header className="vscode-sidebar-title"><strong>SEARCH</strong></header><div className="vscode-search-box"><Search size={15} /><input autoFocus value={query} onChange={(event) => onQuery(event.target.value)} placeholder="Search" /></div><section className="vscode-search-results">{query.trim() ? documents.map((document) => <button type="button" key={document.id} onClick={() => onOpen(document)}><FileText size={15} />{document.title}</button>) : <p>输入文件名以搜索资料库。</p>}{query.trim() && !documents.length && <p>没有结果。</p>}</section></>;
+}
+
+export function ExtensionsSidebar() {
+  return <><header className="vscode-sidebar-title"><strong>EXTENSIONS</strong></header><section className="vscode-search-results"><p>这里以后放论文解析器、OCR、引用管理和模型连接器。</p></section></>;
+}
