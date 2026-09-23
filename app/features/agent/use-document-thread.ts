@@ -68,17 +68,19 @@ export function useDocumentThread(document: AgentDocument | null) {
     // A pending read for this document can no longer replace mutation results.
     reads.current.set(id, (reads.current.get(id) ?? 0) + 1);
     update(id, (entry) => ({ ...entry, busy: true, error: "" }));
-    try { await operation(); }
+    let completed = false;
+    try { await operation(); completed = true; }
     catch (error) { update(id, (entry) => ({ ...entry, error: (error as Error).message })); }
     finally {
       locks.current.delete(id);
       update(id, (entry) => ({ ...entry, busy: false }));
     }
+    return completed;
   }
 
   async function save() {
     if (!document || !id) return;
-    await mutate(async () => {
+    return mutate(async () => {
       const draft = thread.editing?.draft ?? thread.draft;
       const input = validateQuestion({ content: draft.content, contextPage: draft.page.trim() ? Number(draft.page) : null, sourceQuote: draft.quote }, document.page_count);
       const signature = JSON.stringify(input);
@@ -102,7 +104,7 @@ export function useDocumentThread(document: AgentDocument | null) {
     if (!id) return;
     await mutate(async () => {
       await request(id, "DELETE", { id: messageId });
-      update(id, (entry) => ({ ...entry, messages: entry.messages.filter((item) => item.id !== messageId), editing: entry.editing?.id === messageId ? null : entry.editing }));
+      update(id, (entry) => ({ ...entry, messages: entry.messages.filter((item) => item.id !== messageId && item.parent_message_id !== messageId), editing: entry.editing?.id === messageId ? null : entry.editing }));
     });
   }
 
@@ -111,8 +113,18 @@ export function useDocumentThread(document: AgentDocument | null) {
     update(id, (entry) => ({ ...entry, error: "", editing: { id: message.id, draft: { content: message.content, page: message.context_page?.toString() ?? "", quote: message.source_quote ?? "" } } }));
   }
 
+  async function saveResponse(question: AgentMessage, content: string) {
+    if (!id) return;
+    return mutate(async () => {
+      const data = await request<{ message: AgentMessage }>(id, "POST", {
+        id: crypto.randomUUID(), role: "assistant", parentMessageId: question.id, content,
+      });
+      update(id, (entry) => ({ ...entry, messages: [...entry.messages, data.message] }));
+    });
+  }
+
   return {
-    ...thread, currentDraft: thread.editing?.draft ?? thread.draft, setDraft, save, remove, edit,
+    ...thread, currentDraft: thread.editing?.draft ?? thread.draft, setDraft, save, saveResponse, remove, edit,
     retry: () => id && load(id),
     cancelEdit: () => id && update(id, (entry) => ({ ...entry, editing: null, error: "" })),
   };

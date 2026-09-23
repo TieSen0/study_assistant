@@ -1,8 +1,8 @@
 "use client";
 
-import { Bot, Check, ChevronRight, Copy, FileText, PanelRight, Pencil, RotateCcw, Send, Trash2 } from "lucide-react";
+import { Bot, Check, ChevronRight, ClipboardPaste, Copy, FileText, PanelRight, Pencil, RotateCcw, Send, Trash2 } from "lucide-react";
 import { useState } from "react";
-import { MAX_QUESTION, MAX_QUOTE, questionContext, type AgentDocument, type AgentMessage } from "./model";
+import { MAX_QUESTION, MAX_QUOTE, MAX_RESPONSE, manualPrompt, questionContext, type AgentDocument, type AgentMessage } from "./model";
 import type { DocumentThread } from "./use-document-thread";
 import "./agent.css";
 
@@ -11,12 +11,26 @@ function SourceLabel({ message }: { message: AgentMessage }) {
   return <>第 {message.context_page} 页{message.context_kind === "document" ? " · 旧版记录，待核对" : ""}</>;
 }
 
+function AssistantResponse({ message, onJump }: { message: AgentMessage; onJump: (page: number) => void }) {
+  return <section className="agent-response">
+    <div className="agent-response-title"><Bot size={13} /><span>导入的 AI 回答</span><span>待你核验</span></div>
+    <p>{message.content}</p>
+    <div className="agent-question-actions">
+      {message.context_page !== null && <button type="button" onClick={() => onJump(message.context_page!)}>查看原文 <ChevronRight size={13} /></button>}
+    </div>
+    <small>此回答由外部聊天手动粘贴，Lens 尚未自动验证。</small>
+  </section>;
+}
+
 function QuestionCard({ message, document, thread, onJump }: { message: AgentMessage; document: AgentDocument; thread: DocumentThread; onJump: (page: number) => void }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [copyState, setCopyState] = useState("");
+  const [answerOpen, setAnswerOpen] = useState(false);
+  const [answer, setAnswer] = useState("");
   const context = questionContext(document, message);
-  async function copy() {
-    try { await navigator.clipboard.writeText(JSON.stringify(context, null, 2)); setCopyState("已复制"); }
+  const replies = thread.messages.filter((item) => item.parent_message_id === message.id && item.role === "assistant");
+  async function copyPrompt() {
+    try { await navigator.clipboard.writeText(manualPrompt(document, message)); setCopyState("已复制，去粘贴给 ChatGPT"); }
     catch { setCopyState("复制失败，可选中下方内容复制"); }
   }
   return <article className="agent-question">
@@ -25,10 +39,17 @@ function QuestionCard({ message, document, thread, onJump }: { message: AgentMes
     <p>{message.content}</p>
     <div className="agent-question-actions">
       {message.context_page !== null && <button type="button" onClick={() => onJump(message.context_page!)}>查看原文 <ChevronRight size={13} /></button>}
-      {message.role === "user" && <><button type="button" disabled={thread.busy || thread.loading} onClick={() => thread.edit(message)}><Pencil size={12} />编辑</button><button type="button" disabled={thread.busy || thread.loading} onClick={() => setConfirmDelete(true)}><Trash2 size={12} />删除</button></>}
+      <button type="button" disabled={thread.busy || thread.loading} onClick={copyPrompt}>{copyState.startsWith("已复制") ? <Check size={12} /> : <Copy size={12} />}{copyState || "复制给 ChatGPT"}</button>
+      <button type="button" disabled={thread.busy || thread.loading} onClick={() => setAnswerOpen((value) => !value)}><ClipboardPaste size={12} />粘贴回答</button>
+      <button type="button" disabled={thread.busy || thread.loading} onClick={() => thread.edit(message)}><Pencil size={12} />编辑</button><button type="button" disabled={thread.busy || thread.loading} onClick={() => setConfirmDelete(true)}><Trash2 size={12} />删除</button>
     </div>
+    {answerOpen && <form className="agent-answer-compose" onSubmit={(event) => { event.preventDefault(); if (!answer.trim()) return; void thread.saveResponse(message, answer).then((saved) => { if (saved) { setAnswer(""); setAnswerOpen(false); } }); }}>
+      <label>粘贴外部 AI 的回答<textarea aria-label="外部 AI 回答" value={answer} onChange={(event) => setAnswer(event.target.value)} disabled={thread.busy} maxLength={MAX_RESPONSE} rows={5} placeholder="将 ChatGPT Plus 的回答粘贴到这里。" /></label>
+      <div><button type="submit" disabled={thread.busy || !answer.trim()}>{thread.busy ? "正在保存…" : "保存回答"}</button><button type="button" disabled={thread.busy} onClick={() => { setAnswerOpen(false); setAnswer(""); }}>取消</button></div>
+    </form>}
+    {replies.map((reply) => <AssistantResponse key={reply.id} message={reply} onJump={onJump} />)}
     {confirmDelete && <div className="agent-delete-confirm"><span>删除这条问题？</span><button type="button" disabled={thread.busy} onClick={async () => { await thread.remove(message.id); setConfirmDelete(false); }}>确认删除</button><button type="button" disabled={thread.busy} onClick={() => setConfirmDelete(false)}>取消</button></div>}
-    <details className="agent-debug"><summary>引用内容 · Debug</summary><p>摘录由你提供；页面文字来自导入时提取，尚未发送给模型。</p><button type="button" onClick={copy}>{copyState === "已复制" ? <Check size={12} /> : <Copy size={12} />}{copyState || "复制问题与上下文"}</button><pre>{JSON.stringify(context, null, 2)}</pre></details>
+    <details className="agent-debug"><summary>引用内容 · Debug</summary><p>摘录由你提供；页面文字来自导入时提取，尚未发送给模型。</p><pre>{JSON.stringify(context, null, 2)}</pre><p>实际复制给外部聊天的证据包：</p><pre>{manualPrompt(document, message)}</pre></details>
   </article>;
 }
 
@@ -37,12 +58,12 @@ export function AgentSidebar({ document, thread, onJump, onClose }: { document: 
   const disabled = !document || thread.busy;
   return <aside className="vscode-secondary" aria-label="文档问题">
     <header className="vscode-sidebar-title"><strong>LENS AGENT</strong><button type="button" onClick={onClose} aria-label="关闭次级侧栏"><PanelRight size={16} /></button></header>
-    <div className="vscode-agent-context"><Bot size={19} /><div><b>{document?.title ?? "未选择文件"}</b><small>{document ? `${document.page_count} 页 · ${thread.messages.length} 条问题` : "打开资料后记录问题"}</small></div></div>
+    <div className="vscode-agent-context"><Bot size={19} /><div><b>{document?.title ?? "未选择文件"}</b><small>{document ? `${document.page_count} 页 · ${thread.messages.filter((message) => message.role === "user").length} 条问题` : "打开资料后记录问题"}</small></div></div>
     <section className="vscode-agent-thread" aria-label="已保存的问题" aria-busy={thread.loading}>
       {thread.loading && <p role="status">正在读取问题…</p>}
       {thread.loadError && <div className="agent-error" role="alert"><p>{thread.loadError}</p><button type="button" onClick={thread.retry}><RotateCcw size={13} />重新加载</button></div>}
-      {!thread.loading && document && thread.messages.map((message) => <QuestionCard key={message.id} message={message} document={document} thread={thread} onJump={onJump} />)}
-      {!thread.loading && !thread.loadError && !thread.messages.length && <p>{document ? "遇到不理解的地方，记下问题并附上原文。" : "你的问题和引用会按文档保存在这里。"}</p>}
+      {!thread.loading && document && thread.messages.filter((message) => message.role === "user").map((message) => <QuestionCard key={message.id} message={message} document={document} thread={thread} onJump={onJump} />)}
+      {!thread.loading && !thread.loadError && !thread.messages.some((message) => message.role === "user") && <p>{document ? "遇到不理解的地方，记下问题并附上原文。" : "你的问题和引用会按文档保存在这里。"}</p>}
     </section>
     <form className="vscode-agent-compose" onSubmit={(event) => { event.preventDefault(); void thread.save(); }}>
       <div className="agent-compose-title"><b>{thread.editing ? "编辑问题" : "记录问题"}</b>{thread.editing && <button type="button" disabled={thread.busy} onClick={thread.cancelEdit}>取消编辑</button>}</div>
@@ -51,13 +72,13 @@ export function AgentSidebar({ document, thread, onJump, onClose }: { document: 
       <textarea aria-label="问题内容" value={draft.content} onChange={(event) => thread.setDraft({ content: event.target.value })} disabled={disabled} maxLength={MAX_QUESTION} placeholder={document ? "这段内容哪里没理解？" : "先打开一份资料"} rows={3} />
       {thread.error && <p className="agent-error" role="alert">{thread.error}</p>}
       <button className="agent-submit" type="submit" disabled={disabled || !draft.content.trim() || thread.loading || !thread.loaded || !!thread.loadError}>{thread.busy ? "正在保存…" : thread.editing ? "保存修改" : "保存问题"}<Send size={13} /></button>
-      <small>模型尚未连接 · 已保存的问题刷新后仍在</small>
+      <small>不消耗 API Token · 可复制证据包到 ChatGPT Plus，再把回答粘回这里</small>
     </form>
   </aside>;
 }
 
 export function NotesSidebar({ document, thread, onJump, onOpenAgent }: { document: AgentDocument | null; thread: DocumentThread; onJump: (page: number) => void; onOpenAgent: () => void }) {
   return <><header className="vscode-sidebar-title"><strong>NOTES</strong></header><section className="vscode-search-results agent-notes">
-    {!document ? <p>先打开一份资料。</p> : thread.loading ? <p>正在读取问题…</p> : thread.loadError ? <button type="button" onClick={thread.retry}>读取失败，点击重试</button> : thread.messages.length ? thread.messages.map((message) => <button type="button" key={message.id} onClick={() => { onOpenAgent(); if (message.context_page !== null) onJump(message.context_page); }}><b><SourceLabel message={message} /></b><span>{message.content}</span></button>) : <p>这篇资料还没有问题。</p>}
+    {!document ? <p>先打开一份资料。</p> : thread.loading ? <p>正在读取问题…</p> : thread.loadError ? <button type="button" onClick={thread.retry}>读取失败，点击重试</button> : thread.messages.some((message) => message.role === "user") ? thread.messages.filter((message) => message.role === "user").map((message) => <button type="button" key={message.id} onClick={() => { onOpenAgent(); if (message.context_page !== null) onJump(message.context_page); }}><b><SourceLabel message={message} /></b><span>{message.content}</span></button>) : <p>这篇资料还没有问题。</p>}
   </section></>;
 }

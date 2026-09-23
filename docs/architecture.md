@@ -41,12 +41,24 @@ inference or uncertainty. A model provider is an adapter, so a manual
 copy-to-chat workflow, a local model, or a future API can share the same
 evidence bundle.
 
+### Current manual-provider slice
+
+Lens first supports ChatGPT Plus without an API key: a saved question produces
+an inspectable, bounded evidence package (anchor, user selection, extracted
+page text and an explicit source-of-truth warning). The user copies it to an
+external chat and pastes the response back under that question. The response is
+stored as a child record sharing the question's original-page anchor; deleting
+the question deletes its imported responses. Imported responses are visibly
+labelled as unverified, so copied text is never mistaken for document evidence.
+
 ## Delivery order
 
 1. M0: shell/module boundaries and stable contracts.
 2. M1: reliable original-document reading and anchors.
 3. M2: versioned normal/enhanced extraction with debug output.
-4. M3: reading tasks and grounded agent requests.
+4. M3: reading tasks and grounded agent requests. The manual provider slice is
+   the first vertical path; API and local-model providers plug into its evidence
+   package rather than owning their own prompt format.
 5. M4: cross-document knowledge cards and synthesis.
 
 ## Explicit non-goals for M0

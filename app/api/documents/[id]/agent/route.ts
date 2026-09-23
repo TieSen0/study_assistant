@@ -1,8 +1,8 @@
 import { agentDatabase } from "@/lib/agent-storage";
-import { contextKind, validateQuestion, type AgentMessage } from "@/app/features/agent/model";
+import { contextKind, validateQuestion, validateResponse, type AgentMessage } from "@/app/features/agent/model";
 
 type RouteContext = { params: Promise<{ id: string }> };
-const columns = "id, document_id, role, content, context_page, context_kind, source_quote, created_at";
+const columns = "id, document_id, role, content, context_page, context_kind, source_quote, parent_message_id, created_at";
 const noCache = { "Cache-Control": "no-store" };
 
 class RequestError extends Error {
@@ -48,6 +48,7 @@ async function write(request: Request, context: RouteContext, editing: boolean) 
     const { id: documentId } = await context.params;
     const document = await documentRecord(documentId);
     const body = await readBody(request);
+    if (!editing && body.role === "assistant") return await writeResponse(body, documentId);
     let input;
     try { input = validateQuestion(body, document.page_count); }
     catch (error) { throw new RequestError((error as Error).message, 400); }
@@ -59,7 +60,7 @@ async function write(request: Request, context: RouteContext, editing: boolean) 
         .bind(input.content, input.contextPage, contextKind(input), input.sourceQuote, id, documentId).run();
       if (!result.meta.changes) throw new RequestError("找不到可编辑的问题。", 404);
     } else {
-      await db.prepare("INSERT INTO reading_agent_messages (id, document_id, role, content, context_page, context_kind, source_quote, created_at) VALUES (?, ?, 'user', ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING")
+      await db.prepare("INSERT INTO reading_agent_messages (id, document_id, role, content, context_page, context_kind, source_quote, parent_message_id, created_at) VALUES (?, ?, 'user', ?, ?, ?, ?, NULL, ?) ON CONFLICT(id) DO NOTHING")
         .bind(id, documentId, input.content, input.contextPage, contextKind(input), input.sourceQuote, new Date().toISOString()).run();
     }
     const message = await db.prepare(`SELECT ${columns} FROM reading_agent_messages WHERE id = ? AND document_id = ?`).bind(id, documentId).first<AgentMessage>();
@@ -70,6 +71,24 @@ async function write(request: Request, context: RouteContext, editing: boolean) 
   } catch (error) { return failure(error); }
 }
 
+async function writeResponse(body: Record<string, unknown>, documentId: string) {
+  let input;
+  try { input = validateResponse(body); }
+  catch (error) { throw new RequestError((error as Error).message, 400); }
+  const db = agentDatabase();
+  const source = await db.prepare(`SELECT ${columns} FROM reading_agent_messages WHERE id = ? AND document_id = ? AND role = 'user'`)
+    .bind(input.parentMessageId, documentId).first<AgentMessage>();
+  if (!source) throw new RequestError("找不到这条问题，无法保存回答。", 404);
+  const id = body.id === undefined ? crypto.randomUUID() : messageId(body);
+  await db.prepare("INSERT INTO reading_agent_messages (id, document_id, role, content, context_page, context_kind, source_quote, parent_message_id, created_at) VALUES (?, ?, 'assistant', ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING")
+    .bind(id, documentId, input.content, source.context_page, source.context_kind, source.source_quote, source.id, new Date().toISOString()).run();
+  const message = await db.prepare(`SELECT ${columns} FROM reading_agent_messages WHERE id = ? AND document_id = ?`).bind(id, documentId).first<AgentMessage>();
+  if (!message || message.role !== "assistant" || message.content !== input.content || message.parent_message_id !== source.id) {
+    throw new RequestError("这个回答编号已用于另一条内容。请重新粘贴后保存。", 409);
+  }
+  return Response.json({ message }, { status: 201, headers: noCache });
+}
+
 export function POST(request: Request, context: RouteContext) { return write(request, context, false); }
 export function PATCH(request: Request, context: RouteContext) { return write(request, context, true); }
 
@@ -78,8 +97,11 @@ export async function DELETE(request: Request, context: RouteContext) {
     const { id } = await context.params;
     await documentRecord(id);
     const body = await readBody(request);
-    await agentDatabase().prepare("DELETE FROM reading_agent_messages WHERE id = ? AND document_id = ? AND role = 'user'")
-      .bind(messageId(body), id).run();
+    const questionId = messageId(body);
+    await agentDatabase().batch([
+      agentDatabase().prepare("DELETE FROM reading_agent_messages WHERE document_id = ? AND parent_message_id = ?").bind(id, questionId),
+      agentDatabase().prepare("DELETE FROM reading_agent_messages WHERE id = ? AND document_id = ? AND role = 'user'").bind(questionId, id),
+    ]);
     return Response.json({ ok: true }, { headers: noCache });
   } catch (error) { return failure(error); }
 }

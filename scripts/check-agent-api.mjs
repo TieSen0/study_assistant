@@ -8,7 +8,9 @@ const documents = [];
 let checks = 0;
 async function call(path, options = {}, expected = 200) {
   const response = await fetch(new URL(path, origin), options);
-  const value = await response.json();
+  const payload = await response.text();
+  assert.ok(payload, `Empty response from ${options.method || "GET"} ${path}`);
+  const value = JSON.parse(payload);
   assert.equal(response.status, expected, JSON.stringify(value));
   checks++;
   return value;
@@ -44,6 +46,7 @@ try {
   const saved = await call(a, json("POST", question), 201);
   assert.equal(saved.message.context_kind, "selection");
   assert.equal(saved.message.source_quote, question.sourceQuote);
+  assert.equal(saved.message.parent_message_id, null);
   assert.equal((await call(a, json("POST", question), 201)).message.id, saved.message.id);
   assert.equal((await call(a)).messages.length, 1, "Retry must not duplicate the question");
   assert.equal((await call(b)).messages.length, 0);
@@ -53,6 +56,13 @@ try {
   const edited = { ...question, content: "Updated question", contextPage: 3, sourceQuote: "Citation test - page 3" };
   await call(a, json("PATCH", edited));
   assert.equal((await call(a)).messages[0].context_page, 3);
+  const answer = { id: crypto.randomUUID(), role: "assistant", parentMessageId: question.id, content: "这是从外部聊天粘贴回 Lens 的回答。" };
+  const savedAnswer = await call(a, json("POST", answer), 201);
+  assert.equal(savedAnswer.message.role, "assistant");
+  assert.equal(savedAnswer.message.parent_message_id, question.id);
+  await call(b, json("POST", answer), 404);
+  await call(a, json("POST", { ...answer, id: crypto.randomUUID(), parentMessageId: "missing-question" }), 404);
+  await call(a, json("POST", { ...answer, id: crypto.randomUUID(), content: " " }), 400);
   await call(a, json("POST", { ...question, id: crypto.randomUUID(), content: "Whole document question", contextPage: null, sourceQuote: "" }), 201);
   const whole = (await call(a)).messages.find((message) => message.context_page === null);
   assert.equal(whole.context_kind, "document");
@@ -61,7 +71,7 @@ try {
   await call(a, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{" }, 400);
   await call("/api/documents/does-not-exist/agent", {}, 404);
   await call(a, json("DELETE", { id: question.id }));
-  assert.equal((await call(a)).messages.length, 1);
+  assert.equal((await call(a)).messages.length, 1, "Deleting a question must remove its imported answer");
   await call(a, json("DELETE", { id: whole.id }));
   assert.equal((await call(a)).messages.length, 0);
   console.log(`PASS: ${checks} local API checks (persistence, retry, isolation, edits, deletion, validation).`);

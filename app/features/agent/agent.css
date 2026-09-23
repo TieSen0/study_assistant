@@ -25,6 +25,17 @@
 .agent-question button:hover { background: #354453; }
 .agent-question button:disabled { opacity: .5; cursor: wait; }
 .agent-delete-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-top: 8px; padding: 8px; background: #3a2525; font-size: 12px; }
+.agent-answer-compose { display: grid; gap: 7px; margin-top: 10px; padding: 9px; border: 1px solid #3d5265; background: #1d252d; }
+.agent-answer-compose label { display: grid; gap: 5px; color: #b9d5ed; font-size: 12px; }
+.agent-answer-compose textarea { width: 100%; resize: vertical; border: 1px solid #465566; border-radius: 3px; background: #15191d; color: #e6edf3; padding: 7px; font: 13px/1.55 inherit; }
+.agent-answer-compose > div { display: flex; gap: 8px; }
+.agent-answer-compose > div button { padding: 4px 7px; border: 1px solid #4e6e8b; background: #29445f; color: #eaf5ff; }
+.agent-answer-compose > div button + button { border-color: transparent; background: transparent; color: #b5c1cc; }
+.agent-response { margin-top: 10px; padding: 10px; border-left: 3px solid #5b9bd5; background: #1b242d; }
+.agent-response-title { display: flex; align-items: center; gap: 5px; color: #bdddff; font-size: 12px; }
+.agent-response-title span:last-child { margin-left: auto; color: #d4b87a; }
+.agent-response > p { margin: 9px 0 3px; font-size: 13px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-response > small { display: block; margin-top: 8px; color: #9eabb5; font-size: 11px; }
 .agent-debug { margin-top: 10px; border-top: 1px solid #394048; padding-top: 8px; color: #a6b2bd; }
 .agent-debug summary { cursor: pointer; font-size: 12px; }
 .vscode-agent-thread .agent-debug p { margin: 8px 0; font-size: 12px; color: #a7b6c5; }
