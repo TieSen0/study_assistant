@@ -1,4 +1,6 @@
-export type AgentDocument = { id: string; title: string; page_count: number; pages?: { pageNumber: number; content: string }[] };
+import type { ReadingDocument } from "../../domain/reading";
+
+export type AgentDocument = Pick<ReadingDocument, "id" | "title" | "page_count" | "pages">;
 export type AgentMessage = {
   id: string;
   document_id: string;
